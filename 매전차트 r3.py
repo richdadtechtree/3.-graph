@@ -7509,14 +7509,14 @@ class KBLandApp:
                     dates_high = [t['date'] for t in high_trades]
                     prices_high = [t['price'] for t in high_trades]
                     ax1.scatter(dates_high, prices_high, color=high_floor_color,
-                               alpha=0.3, s=50, edgecolors='white', linewidths=0.5,
+                               alpha=0.6, s=50, edgecolors='white', linewidths=0.5,
                                label='매매실거래(5층↑)', zorder=0.5)
 
                 if low_trades:
                     dates_low = [t['date'] for t in low_trades]
                     prices_low = [t['price'] for t in low_trades]
                     ax1.scatter(dates_low, prices_low, color=low_floor_color,
-                               alpha=0.3, s=50, edgecolors='white', linewidths=0.5,
+                               alpha=0.5, s=50, edgecolors='white', linewidths=0.5,
                                label='매매실거래(4층↓)', zorder=0.5)
             
             else:
@@ -7553,14 +7553,14 @@ class KBLandApp:
                     dates_high = [t['date'] for t in high_leases]
                     prices_high = [t['price'] for t in high_leases]
                     ax1.scatter(dates_high, prices_high, color=lease_high_floor_color,
-                               alpha=0.3, s=50, edgecolors='white', linewidths=0.5,
+                               alpha=0.6, s=50, edgecolors='white', linewidths=0.5,
                                label='전세실거래(5층↑)', zorder=0.5)
 
                 if low_leases:
                     dates_low = [t['date'] for t in low_leases]
                     prices_low = [t['price'] for t in low_leases]
                     ax1.scatter(dates_low, prices_low, color=lease_low_floor_color,
-                               alpha=0.3, s=50, edgecolors='white', linewidths=0.5,
+                               alpha=0.5, s=50, edgecolors='white', linewidths=0.5,
                                label='전세실거래(4층↓)', zorder=0.5)
 
             else:
@@ -8513,7 +8513,7 @@ class KBLandApp:
                         y=[t['price'] for t in high_floor_trades],
                         mode='markers',
                         name='실거래(5층↑)',
-                        marker=dict(color='#3498DB', size=5, opacity=0.5,
+                        marker=dict(color='#3498DB', size=6, opacity=0.85,
                                    line=dict(color='white', width=0.5)),
                         hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
                                       '<b>실거래가</b>: %{y:,.0f}만원<br>' +
@@ -8535,7 +8535,7 @@ class KBLandApp:
                         y=[t['price'] for t in low_floor_trades],
                         mode='markers',
                         name='실거래(4층↓)',
-                        marker=dict(color='#95A5A6', size=5, opacity=0.3,
+                        marker=dict(color='#95A5A6', size=6, opacity=0.65,
                                    line=dict(color='white', width=0.5)),
                         hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
                                       '<b>실거래가</b>: %{y:,.0f}만원<br>' +
@@ -8550,7 +8550,7 @@ class KBLandApp:
                     y=[l['price'] for l in leases],
                     mode='markers',
                     name='전세실거래',
-                    marker=dict(color='#FFB366', size=4, opacity=0.4,
+                    marker=dict(color='#FFB366', size=5, opacity=0.75,
                                symbol='diamond', line=dict(color='white', width=0.5)),
                     hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
                                   '<b>전세실거래</b>: %{y:,.0f}만원<br>' +
@@ -9286,6 +9286,152 @@ class KBLandApp:
                 'doubleClick': 'autosize',  # 더블클릭 시 자동 크기 조정
                 'scrollZoom': False  # 마우스 휠 스크롤 줌 비활성화
             })
+
+            # HTML 파일에 자동 계산 JavaScript 추가
+            with open(output_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+
+            # KB 데이터를 JavaScript에서 사용할 수 있도록 JSON으로 변환
+            kb_data_js = {
+                'dates': df['date'].dt.strftime('%Y-%m-%d').tolist(),
+                'prices': {}
+            }
+
+            # 선택된 매매가 타입들의 데이터 추가
+            if hasattr(self, 'show_kb_price') and self.show_kb_price.get():
+                sale_types = [t for t, var in self.sale_price_types.items() if var.get()] if hasattr(self, 'sale_price_types') else ['normal']
+                for sale_type in sale_types:
+                    col_name = f'매매가_{sale_type}'
+                    if col_name in df.columns:
+                        kb_data_js['prices'][sale_type] = df[col_name].tolist()
+
+            import json
+            kb_data_json = json.dumps(kb_data_js)
+
+            # JavaScript 코드 작성
+            js_code = f'''
+<script>
+// KB 매매가 데이터
+const kbData = {kb_data_json};
+
+// 날짜를 가장 가까운 데이터 포인트로 변환
+function findNearestDataPoint(dateStr) {{
+    const targetDate = new Date(dateStr);
+    let nearestIdx = 0;
+    let minDiff = Math.abs(new Date(kbData.dates[0]) - targetDate);
+
+    for (let i = 1; i < kbData.dates.length; i++) {{
+        const diff = Math.abs(new Date(kbData.dates[i]) - targetDate);
+        if (diff < minDiff) {{
+            minDiff = diff;
+            nearestIdx = i;
+        }}
+    }}
+    return nearestIdx;
+}}
+
+// 선이 그려질 때마다 자동 계산
+var graphDiv = document.getElementsByClassName('plotly-graph-div')[0];
+
+graphDiv.on('plotly_relayout', function(eventData) {{
+    // 새로운 도형이 추가되었는지 확인 (선 그리기)
+    if (eventData['shapes']) {{
+        const shapes = eventData['shapes'];
+        const lastShape = shapes[shapes.length - 1];
+
+        // 선(line)인 경우에만 처리
+        if (lastShape && lastShape.type === 'line') {{
+            const x0 = lastShape.x0;
+            const x1 = lastShape.x1;
+
+            // 날짜 문자열 추출 (YYYY-MM-DD 형식으로 변환)
+            const startDate = new Date(x0).toISOString().split('T')[0];
+            const endDate = new Date(x1).toISOString().split('T')[0];
+
+            // 가장 가까운 데이터 포인트 찾기
+            const startIdx = findNearestDataPoint(startDate);
+            const endIdx = findNearestDataPoint(endDate);
+
+            // 각 매매가 타입별로 계산
+            let calculationText = '';
+            let firstType = true;
+
+            for (const [priceType, prices] of Object.entries(kbData.prices)) {{
+                const startPrice = prices[startIdx];
+                const endPrice = prices[endIdx];
+                const priceDiff = endPrice - startPrice;
+                const priceChangeRate = ((priceDiff / startPrice) * 100).toFixed(2);
+
+                const typeLabel = priceType === 'normal' ? '일반' : (priceType === 'low' ? '하위' : '상위');
+
+                if (!firstType) {{
+                    calculationText += '<br>';
+                }}
+                firstType = false;
+
+                calculationText += `<b>매매가(${{typeLabel}})</b><br>`;
+                calculationText += `${{kbData.dates[startIdx]}} → ${{kbData.dates[endIdx]}}<br>`;
+                calculationText += `${{startPrice.toLocaleString()}}만원 → ${{endPrice.toLocaleString()}}만원<br>`;
+
+                if (priceDiff >= 0) {{
+                    calculationText += `<span style="color: red;">▲ ${{priceDiff.toLocaleString()}}만원 (↑${{priceChangeRate}}%)</span>`;
+                }} else {{
+                    calculationText += `<span style="color: blue;">▼ ${{Math.abs(priceDiff).toLocaleString()}}만원 (↓${{Math.abs(priceChangeRate)}}%)</span>`;
+                }}
+            }}
+
+            // 선의 중간 지점에 주석 추가
+            const midX = new Date((new Date(x0).getTime() + new Date(x1).getTime()) / 2);
+            const midY = (lastShape.y0 + lastShape.y1) / 2;
+
+            // 기존 계산 주석 제거 (이름이 '가격변화'로 시작하는 것들)
+            const currentAnnotations = graphDiv.layout.annotations || [];
+            const filteredAnnotations = currentAnnotations.filter(ann =>
+                !ann.text.includes('매매가(일반)') &&
+                !ann.text.includes('매매가(하위)') &&
+                !ann.text.includes('매매가(상위)')
+            );
+
+            // 새로운 주석 추가
+            filteredAnnotations.push({{
+                x: midX,
+                y: midY,
+                text: calculationText,
+                showarrow: true,
+                arrowhead: 2,
+                arrowsize: 1,
+                arrowwidth: 2,
+                arrowcolor: '#E74C3C',
+                ax: 0,
+                ay: -80,
+                bgcolor: 'rgba(255, 255, 255, 0.95)',
+                bordercolor: '#E74C3C',
+                borderwidth: 2,
+                borderpad: 8,
+                font: {{
+                    size: 12,
+                    color: '#2C3E50',
+                    family: 'Malgun Gothic, Arial'
+                }},
+                align: 'left'
+            }});
+
+            // 레이아웃 업데이트
+            Plotly.relayout(graphDiv, {{annotations: filteredAnnotations}});
+        }}
+    }}
+}});
+</script>
+</body>
+'''
+
+            # </body> 태그 직전에 JavaScript 삽입
+            html_content = html_content.replace('</body>', js_code)
+
+            # 수정된 HTML 저장
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+
             print(f"Plotly HTML 그래프 저장 완료: {output_path}")
 
         except Exception as e:

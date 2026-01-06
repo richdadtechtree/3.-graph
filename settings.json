@@ -3,5 +3,12 @@
   "history_path": "D:/download/5. kb 매전차트\\history",
   "lawdong_path": "C:/law-dong/law-dong.txt",
   "sentiment_excel_path": "D:/OneDrive/3.1 부동산/1. 부동산 조사/업데이트용 시계열/주간시계열.xlsx",
-  "regional_income_excel_path": "D:/OneDrive/3.1 부동산/1. 부동산 조사/업데이트용 시계열/근로소득-주소지.xlsx"
+  "regional_income_excel_path": "D:/OneDrive/3.1 부동산/1. 부동산 조사/업데이트용 시계열/근로소득-주소지.xlsx",
+  "show_una_sentiment": true,
+  "show_pir": true,
+  "show_disposable_pir": true,
+  "show_regional_pir": false,
+  "show_kb_price": true,
+  "show_naver_deal": false,
+  "show_real_trade": true
 }

@@ -6469,9 +6469,9 @@ class KBLandApp:
                     
                     # 해당 열이 데이터프레임에 존재하는지 확인
                     if col_name in df.columns:
-                        # seaborn lineplot 사용
+                        # seaborn lineplot 사용 - KB 매매가를 가장 앞으로 (zorder=20)
                         sns.lineplot(data=df, x='date', y=col_name, color=color, label=label,
-                                   linewidth=3, ax=ax1, zorder=4)
+                                   linewidth=3, ax=ax1, zorder=20)
                         line_sale = ax1.get_lines()[-1]  # 마지막으로 추가된 라인 가져오기
                         lines.append(line_sale)
                         line_labels.append(label)
@@ -6480,27 +6480,108 @@ class KBLandApp:
                 # 전세가 그래프 (각 유형별로)
                 for idx, lease_type in enumerate(lease_types):
                     col_name = f"전세가_{lease_type}"
-                    label = f"전세가({price_type_labels[lease_type]})"
                     color = lease_colors[lease_type]
-                    
+
                     # 해당 열이 데이터프레임에 존재하는지 확인
                     if col_name in df.columns:
-                        # seaborn lineplot 사용
+                        # 모든 선택된 매매가 타입과의 갭 계산 및 레이블 생성
+                        gap_texts = []
+                        for sale_type in sale_types:
+                            sale_col_name = f"매매가_{sale_type}"
+                            if sale_col_name in df.columns:
+                                # 최근 가격으로 갭 계산
+                                recent_sale = df[sale_col_name].iloc[-1]
+                                recent_lease = df[col_name].iloc[-1]
+                                gap = recent_sale - recent_lease
+                                gap_rate = (gap / recent_sale * 100) if recent_sale > 0 else 0
+                                # 타입명과 갭 금액(퍼센트) 표시 - 매매가 금액은 제외
+                                type_label = price_type_labels[sale_type]
+                                gap_texts.append(f"{type_label}갭 {gap:,.0f}({gap_rate:.1f}%)")
+
+                        # 레이블 구성: 전세가 타입 + 갭 정보들
+                        gap_info = ", ".join(gap_texts) if gap_texts else ""
+                        label = f"전세가({price_type_labels[lease_type]}) [{gap_info}]"
+
+                        # seaborn lineplot 사용 - KB 전세가를 가장 앞으로 (zorder=20)
                         sns.lineplot(data=df, x='date', y=col_name, color=color, label=label,
-                                   linewidth=3, ax=ax1, zorder=4)
+                                   linewidth=3, ax=ax1, zorder=20)
                         line_lease = ax1.get_lines()[-1]  # 마지막으로 추가된 라인 가져오기
                         lines.append(line_lease)
                         line_labels.append(label)
                         print(f"전세가 그래프 추가: {label}")
+
+                # KB 매매가/전세가 최근 가격 레이블 표시
+                if len(df) > 0:
+                    latest_date = df['date'].iloc[-1]
+
+                    # 매매가 최근 가격 레이블 - 모든 선택된 타입에 대해 표시
+                    label_offset_y = -40  # 시작 위치 (위쪽)
+                    for idx, sale_type in enumerate(sale_types):
+                        col_name = f"매매가_{sale_type}"
+                        if col_name in df.columns:
+                            current_sale = df[col_name].iloc[-1]
+                            max_sale = df[col_name].max()
+                            type_label = price_type_labels[sale_type]
+
+                            # 현재가가 최고가인 경우 레이블 표시 안함 (오차 1만원 이내)
+                            is_peak = abs(current_sale - max_sale) < 1
+                            if is_peak:
+                                continue
+
+                            # 레이블 텍스트
+                            label_text = f"매매 {type_label}\n{latest_date.strftime('%Y-%m')}\n{current_sale:,.0f}만원"
+
+                            ax1.annotate(label_text,
+                                       xy=(latest_date, current_sale),
+                                       xytext=(10, label_offset_y), textcoords='offset points',
+                                       fontsize=9, fontweight='bold',
+                                       color=sale_colors[sale_type],
+                                       bbox=dict(boxstyle='round,pad=0.5',
+                                               facecolor='white',
+                                               edgecolor=sale_colors[sale_type],
+                                               alpha=0.9, linewidth=2),
+                                       zorder=25,
+                                       ha='left', va='center')
+                            label_offset_y += 40  # 다음 레이블은 아래로
+
+                    # 전세가 최근 가격 레이블 - 모든 선택된 타입에 대해 표시
+                    label_offset_y = -40  # 시작 위치 (위쪽)
+                    for idx, lease_type in enumerate(lease_types):
+                        col_name = f"전세가_{lease_type}"
+                        if col_name in df.columns:
+                            current_lease = df[col_name].iloc[-1]
+                            max_lease = df[col_name].max()
+                            type_label = price_type_labels[lease_type]
+
+                            # 현재가가 최고가인 경우 레이블 표시 안함 (오차 1만원 이내)
+                            is_peak = abs(current_lease - max_lease) < 1
+                            if is_peak:
+                                continue
+
+                            # 레이블 텍스트
+                            label_text = f"전세 {type_label}\n{latest_date.strftime('%Y-%m')}\n{current_lease:,.0f}만원"
+
+                            ax1.annotate(label_text,
+                                       xy=(latest_date, current_lease),
+                                       xytext=(10, label_offset_y), textcoords='offset points',
+                                       fontsize=9, fontweight='bold',
+                                       color=lease_colors[lease_type],
+                                       bbox=dict(boxstyle='round,pad=0.5',
+                                               facecolor='white',
+                                               edgecolor=lease_colors[lease_type],
+                                               alpha=0.9, linewidth=2),
+                                       zorder=25,
+                                       ha='left', va='center')
+                            label_offset_y += 40  # 다음 레이블은 아래로
             else:
                 print("KB시세 그래프 표시 비활성화 - KB시세 그래프 생략")
                 # KB시세를 표시하지 않아도 line_sale과 line_lease 변수는 필요 (다른 코드에서 참조)
                 line_sale = None
                 line_lease = None
             # 그래프 생성 직후에 데이터 확인 (디버깅용)
-            print("\n=== 그래프 생성 직후 데이터 확인 ===")
-            print(f"매매가 그래프 데이터 처음 3개: {line_sale.get_ydata()[:3]}")
-            print(f"전세가 그래프 데이터 처음 3개: {line_lease.get_ydata()[:3]}")
+            # print("\n=== 그래프 생성 직후 데이터 확인 ===")
+            # print(f"매매가 그래프 데이터 처음 3개: {line_sale.get_ydata()[:3]}")
+            # print(f"전세가 그래프 데이터 처음 3개: {line_lease.get_ydata()[:3]}")
 
         
             print(f"결정된 매매가 레이블: {sale_label}")
@@ -6598,15 +6679,16 @@ class KBLandApp:
                     lines.append(line_pir_regional)
                     lines.append(line_pir_regional_avg)
                         
-            labels = [l.get_label() for l in lines]
+            # None이 아닌 선만 필터링하고 레이블도 함께 추출
             valid_lines = [l for l in lines if l is not None]
-                        
+            valid_labels = [l.get_label() for l in valid_lines]
+
             if valid_lines:  # 유효한 선이 있을 때만 범례 생성
-                ax1.legend(valid_lines, labels, 
+                ax1.legend(valid_lines, valid_labels,
                           loc='upper left',
                           bbox_to_anchor=(0.02, 0.98),
-                          ncol=1,               
-                          fontsize=9,           
+                          ncol=1,
+                          fontsize=9,
                           framealpha=0.8)
                         
             # ... 이후 코드 ...
@@ -6893,28 +6975,29 @@ class KBLandApp:
                 if period_df.empty:
                     return None
 
-                # 선택된 KB 가격 타입 중 가장 큰 값의 컬럼 찾기
-                selected_columns = []
+                # 우선순위: 상위 > 일반 > 하위
+                priority_order = ['high', 'normal', 'low']
+                selected_types = []
+
                 if hasattr(self, 'sale_price_types'):
                     for type_name, var in self.sale_price_types.items():
                         if var.get():  # 체크된 항목만
-                            col_name = f'매매가_{type_name}'
-                            if col_name in df.columns:
-                                selected_columns.append(col_name)
+                            selected_types.append(type_name)
 
-                # 선택된 컬럼이 없으면 기본 '매매가' 사용
-                if not selected_columns:
-                    selected_columns = ['매매가']
+                # 선택된 타입이 없으면 'normal' 사용
+                if not selected_types:
+                    selected_types = ['normal']
 
-                # 각 컬럼의 평균값을 구해서 가장 큰 값의 컬럼 선택
-                max_avg_value = 0
-                target_column = '매매가'
-                for col in selected_columns:
-                    if col in period_df.columns:
-                        avg_value = period_df[col].mean()
-                        if avg_value > max_avg_value:
-                            max_avg_value = avg_value
-                            target_column = col
+                # 우선순위에 따라 정렬
+                selected_types_sorted = sorted(selected_types, key=lambda x: priority_order.index(x) if x in priority_order else 999)
+
+                # 가장 우선순위가 높은 타입 선택
+                target_type = selected_types_sorted[0]
+                target_column = f'매매가_{target_type}'
+
+                # 컬럼이 없으면 기본 '매매가' 사용
+                if target_column not in period_df.columns:
+                    target_column = '매매가'
 
                 # 해당 컬럼에서 최저점 찾기
                 if target_column in period_df.columns:
@@ -6931,7 +7014,7 @@ class KBLandApp:
                                 'price': low_price,
                                 'type': 'recent_low'
                             }
-                
+
                 return None
             
             # 매매가 포인트 처리 블록 시작
@@ -7426,15 +7509,15 @@ class KBLandApp:
                     dates_high = [t['date'] for t in high_trades]
                     prices_high = [t['price'] for t in high_trades]
                     ax1.scatter(dates_high, prices_high, color=high_floor_color,
-                               alpha=0.4, s=50, edgecolors='white', linewidths=0.5,
-                               label='매매실거래(5층↑)', zorder=3)
+                               alpha=0.3, s=50, edgecolors='white', linewidths=0.5,
+                               label='매매실거래(5층↑)', zorder=0.5)
 
                 if low_trades:
                     dates_low = [t['date'] for t in low_trades]
                     prices_low = [t['price'] for t in low_trades]
                     ax1.scatter(dates_low, prices_low, color=low_floor_color,
-                               alpha=0.4, s=50, edgecolors='white', linewidths=0.5,
-                               label='매매실거래(4층↓)', zorder=3)
+                               alpha=0.3, s=50, edgecolors='white', linewidths=0.5,
+                               label='매매실거래(4층↓)', zorder=0.5)
             
             else:
                 print("매매 실거래가 그래프 표시 생략")   
@@ -7470,15 +7553,15 @@ class KBLandApp:
                     dates_high = [t['date'] for t in high_leases]
                     prices_high = [t['price'] for t in high_leases]
                     ax1.scatter(dates_high, prices_high, color=lease_high_floor_color,
-                               alpha=0.4, s=50, edgecolors='white', linewidths=0.5,
-                               label='전세실거래(5층↑)', zorder=3)
+                               alpha=0.3, s=50, edgecolors='white', linewidths=0.5,
+                               label='전세실거래(5층↑)', zorder=0.5)
 
                 if low_leases:
                     dates_low = [t['date'] for t in low_leases]
                     prices_low = [t['price'] for t in low_leases]
                     ax1.scatter(dates_low, prices_low, color=lease_low_floor_color,
-                               alpha=0.4, s=50, edgecolors='white', linewidths=0.5,
-                               label='전세실거래(4층↓)', zorder=3)
+                               alpha=0.3, s=50, edgecolors='white', linewidths=0.5,
+                               label='전세실거래(4층↓)', zorder=0.5)
 
             else:
                 print("전세 실거래가 그래프 표시 생략")                    
@@ -7603,14 +7686,14 @@ class KBLandApp:
                     prices_high = [t['price'] for t in high_trades]
                     ax1.scatter(dates_high, prices_high, color=high_floor_color, alpha=0.4,
                                s=50, edgecolors='white', linewidths=0.5,
-                               label='실거래(5층↑)', zorder=1)
+                               label='실거래(5층↑)', zorder=2)
 
                 if low_trades:
                     dates_low = [t['date'] for t in low_trades]
                     prices_low = [t['price'] for t in low_trades]
                     ax1.scatter(dates_low, prices_low, color=low_floor_color, alpha=0.4,
                                s=50, edgecolors='white', linewidths=0.5,
-                               label='실거래(4층↓)', zorder=1)
+                               label='실거래(4층↓)', zorder=2)
         
             # 범례 설정
             lines = [line_sale, line_lease]  # 기본 라인만 추가
@@ -7669,89 +7752,32 @@ class KBLandApp:
             else:
                 lease_col_name = '전세가'  # 기본값
             
-            # 매매가 정보 계산 - 우선순위 높은 유형 사용
-            # 매매가 정보 계산 - 개선된 최근 저점 찾기 로직 추가
-            # 매매가 정보 계산 - 우선순위 높은 유형 사용
-            # 매매가 정보 계산 - 개선된 최근 저점 찾기 로직 추가
-            if df.loc[current_idx, sale_col_name] >= df[sale_col_name].max():
-                # 현재가가 최고가인 경우
-                price_info = {
-                    'max': df.loc[current_idx, sale_col_name],
-                    'max_date': latest_date,
-                    'current': df.loc[current_idx, sale_col_name],
-                    'current_date': latest_date,
-                    'recent_low': None,
-                    'recent_low_date': None
-                }
-                
-                # 최근 12개월 데이터에서 저점을 찾기
-                one_year_ago = latest_date - timedelta(days=365)
-                period_mask = (df['date'] >= one_year_ago) & (df['date'] <= latest_date)
-                recent_year_df = df[period_mask]
-                
-                if not recent_year_df.empty:
-                    min_sale_idx = recent_year_df[sale_col_name].idxmin()
-                    low_date = df.loc[min_sale_idx, 'date']
-                    
-                    # 최저점이 현재가가 아니고, 현재와 최소 1개월 차이나는 경우에만 표시
-                    if min_sale_idx != current_idx:
-                        months_to_current = (latest_date.year - low_date.year) * 12 + latest_date.month - low_date.month
-                        if months_to_current >= 1:
-                            price_info['recent_low'] = df.loc[min_sale_idx, sale_col_name]
-                            price_info['recent_low_date'] = low_date
-                    
-                # 백업: 최근 저점이 아직도 없으면 전체 데이터에서 찾기
-                if price_info['recent_low'] is None:
-                    # 최근 2년 데이터에서 저점을 찾기
-                    two_years_ago = latest_date - timedelta(days=730)
-                    period_mask = (df['date'] >= two_years_ago) & (df['date'] <= latest_date)
-                    period_df = df[period_mask]
-                    
-                    if not period_df.empty:
-                        min_sale_idx = period_df[sale_col_name].idxmin()
-                        low_date = df.loc[min_sale_idx, 'date']
-                        
-                        # 최저점이 현재가가 아니고 유의미한 가격 차이가 있는 경우에만 표시
-                        if min_sale_idx != current_idx:
-                            # 최고가와 최저가 차이가 5% 이상인 경우만 표시
-                            if (price_info['max'] - df.loc[min_sale_idx, sale_col_name]) / price_info['max'] > 0.05:
-                                price_info['recent_low'] = df.loc[min_sale_idx, sale_col_name]
-                                price_info['recent_low_date'] = low_date
-            else:
-                # 기존 로직: 현재가가 최고가가 아닌 경우
-                max_sale_idx_priority = df[sale_col_name].idxmax()
-                period_df = df.loc[max_sale_idx_priority:current_idx]
-                
-                if period_df.empty:
-                    price_info = {
-                        'max': df.loc[max_sale_idx_priority, sale_col_name],
-                        'max_date': df.loc[max_sale_idx_priority, 'date'],
-                        'current': df.loc[current_idx, sale_col_name],
-                        'current_date': latest_date,
-                        'recent_low': None,
-                        'recent_low_date': None
-                    }
-                else:
-                    min_sale_idx = period_df[sale_col_name].idxmin()
-                    
-                    if min_sale_idx == current_idx:
-                        price_info = {
-                            'max': df.loc[max_sale_idx_priority, sale_col_name],
-                            'max_date': df.loc[max_sale_idx_priority, 'date'],
-                            'current': df.loc[current_idx, sale_col_name],
-                            'current_date': latest_date,
-                            'recent_low': None,
-                            'recent_low_date': None
-                        }
-                    else:
-                        price_info = {
-                            'max': df.loc[max_sale_idx_priority, sale_col_name],
-                            'max_date': df.loc[max_sale_idx_priority, 'date'],
-                            'current': df.loc[current_idx, sale_col_name],
-                            'current_date': latest_date,
-                            'recent_low': df.loc[min_sale_idx, sale_col_name],
-                            'recent_low_date': df.loc[min_sale_idx, 'date']
-                        }
+            # 매매가 정보 계산 - 2021년 이후 KB시세 최저가 찾기
+            # 우선순위 높은 유형 사용
+            price_info = {
+                'max': df[sale_col_name].max(),
+                'max_date': df.loc[df[sale_col_name].idxmax(), 'date'],
+                'current': df.loc[current_idx, sale_col_name],
+                'current_date': latest_date,
+                'recent_low': None,
+                'recent_low_date': None
+            }
+
+            # 2021년 이후 데이터에서 최저가 찾기
+            mask_2021 = (df['date'].dt.year >= 2021) & (df['date'] <= latest_date)
+            period_2021_df = df[mask_2021]
+
+            if not period_2021_df.empty:
+                min_sale_idx = period_2021_df[sale_col_name].idxmin()
+                low_date = df.loc[min_sale_idx, 'date']
+                low_price = df.loc[min_sale_idx, sale_col_name]
+
+                # 최저점이 현재가가 아니고, 현재와 최소 6개월 차이나는 경우에만 표시
+                if min_sale_idx != current_idx:
+                    months_to_current = (latest_date.year - low_date.year) * 12 + latest_date.month - low_date.month
+                    if months_to_current > 6:
+                        price_info['recent_low'] = low_price
+                        price_info['recent_low_date'] = low_date
     
     
             # 어노테이션 처리 시
@@ -8371,122 +8397,7 @@ class KBLandApp:
             # Plotly figure 생성
             plotly_fig = go.Figure()
 
-            # ========== 1. 매매가 라인 (KB 시세) - 선택된 모든 타입 그리기 ==========
-            if hasattr(self, 'show_kb_price') and self.show_kb_price.get():
-                # 선택된 매매가 타입들 가져오기
-                sale_types = [t for t, var in self.sale_price_types.items() if var.get()] if hasattr(self, 'sale_price_types') else ['normal']
-
-                # 각 타입별 색상과 스타일 정의 (모두 실선, 명암 차이)
-                sale_type_styles = {
-                    'low': {'color': '#5AA8E8', 'width': 2.5, 'dash': 'solid', 'label': '하위'},
-                    'normal': {'color': '#0066CC', 'width': 3, 'dash': 'solid', 'label': '일반'},
-                    'high': {'color': '#004080', 'width': 2.5, 'dash': 'solid', 'label': '상위'}
-                }
-
-                for sale_type in sale_types:
-                    col_name = f'매매가_{sale_type}'
-                    if col_name in df.columns:
-                        style = sale_type_styles.get(sale_type, {'color': '#0066CC', 'width': 3, 'dash': 'solid', 'label': sale_type})
-                        plotly_fig.add_trace(go.Scatter(
-                            x=df['date'],
-                            y=df[col_name],
-                            mode='lines',
-                            name=f'매매가({style["label"]})',
-                            line=dict(color=style['color'], width=style['width'], dash=style['dash']),
-                            hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
-                                          f'<b>매매가({style["label"]})</b>: %{{y:,.0f}}만원<br>' +
-                                          '<extra></extra>'
-                        ))
-
-            # ========== 2. 전세가 라인 (KB 시세) - 선택된 모든 타입 그리기 ==========
-            if hasattr(self, 'show_kb_price') and self.show_kb_price.get():
-                # 선택된 전세가 타입들 가져오기
-                lease_types = [t for t, var in self.lease_price_types.items() if var.get()] if hasattr(self, 'lease_price_types') else ['normal']
-
-                # 각 타입별 색상과 스타일 정의 (모두 실선, 명암 차이)
-                lease_type_styles = {
-                    'low': {'color': '#FFB366', 'width': 2.5, 'dash': 'solid', 'label': '하위'},
-                    'normal': {'color': '#FF6B00', 'width': 3, 'dash': 'solid', 'label': '일반'},
-                    'high': {'color': '#CC5500', 'width': 2.5, 'dash': 'solid', 'label': '상위'}
-                }
-
-                for lease_type in lease_types:
-                    col_name = f'전세가_{lease_type}'
-                    if col_name in df.columns:
-                        style = lease_type_styles.get(lease_type, {'color': '#FF6B00', 'width': 3, 'dash': 'solid', 'label': lease_type})
-
-                        # 매매가-전세가 갭 계산 (같은 타입 + 일반 타입)
-                        sale_col_same = f'매매가_{lease_type}'
-                        sale_col_normal = '매매가_normal'
-
-                        hover_template = '<b>날짜</b>: %{x|%Y-%m}<br>' + \
-                                       f'<b>전세가({style["label"]})</b>: %{{y:,.0f}}만원<br>'
-
-                        if sale_col_same in df.columns and sale_col_normal in df.columns:
-                            # 두 개의 갭 모두 계산
-                            gap_same = df[sale_col_same] - df[col_name]
-                            gap_rate_same = (gap_same / df[sale_col_same] * 100).round(1)
-                            gap_normal = df[sale_col_normal] - df[col_name]
-                            gap_rate_normal = (gap_normal / df[sale_col_normal] * 100).round(1)
-
-                            customdata_list = list(zip(df[sale_col_same], gap_same, gap_rate_same,
-                                                      df[sale_col_normal], gap_normal, gap_rate_normal))
-
-                            if lease_type == 'normal':
-                                # 일반 전세가는 일반-일반 갭만 표시
-                                hover_template += '<b>매매가(일반)</b>: %{customdata[0]:,.0f}만원<br>' + \
-                                                '<b>갭(일반)</b>: %{customdata[1]:,.0f}만원 (%{customdata[2]:.1f}%)<br>'
-                            else:
-                                # 상위/하위는 같은 타입 갭 + 일반 갭 모두 표시
-                                hover_template += f'<b>매매가({style["label"]})</b>: %{{customdata[0]:,.0f}}만원<br>' + \
-                                                f'<b>갭({style["label"]})</b>: %{{customdata[1]:,.0f}}만원 (%{{customdata[2]:.1f}}%)<br>' + \
-                                                '<b>매매가(일반)</b>: %{customdata[3]:,.0f}만원<br>' + \
-                                                '<b>갭(일반)</b>: %{customdata[4]:,.0f}만원 (%{customdata[5]:.1f}%)<br>'
-
-                            hover_template += '<extra></extra>'
-
-                            plotly_fig.add_trace(go.Scatter(
-                                x=df['date'],
-                                y=df[col_name],
-                                mode='lines',
-                                name=f'전세가({style["label"]})',
-                                line=dict(color=style['color'], width=style['width'], dash=style['dash']),
-                                customdata=customdata_list,
-                                hovertemplate=hover_template
-                            ))
-                        elif sale_col_same in df.columns:
-                            # 같은 타입 갭만 있는 경우
-                            gap_same = df[sale_col_same] - df[col_name]
-                            gap_rate_same = (gap_same / df[sale_col_same] * 100).round(1)
-                            customdata_list = list(zip(df[sale_col_same], gap_same, gap_rate_same))
-
-                            hover_template += f'<b>매매가({style["label"]})</b>: %{{customdata[0]:,.0f}}만원<br>' + \
-                                            f'<b>갭({style["label"]})</b>: %{{customdata[1]:,.0f}}만원 (%{{customdata[2]:.1f}}%)<br>' + \
-                                            '<extra></extra>'
-
-                            plotly_fig.add_trace(go.Scatter(
-                                x=df['date'],
-                                y=df[col_name],
-                                mode='lines',
-                                name=f'전세가({style["label"]})',
-                                line=dict(color=style['color'], width=style['width'], dash=style['dash']),
-                                customdata=customdata_list,
-                                hovertemplate=hover_template
-                            ))
-                        else:
-                            # 매매가 데이터가 없는 경우 기본 호버
-                            plotly_fig.add_trace(go.Scatter(
-                                x=df['date'],
-                                y=df[col_name],
-                                mode='lines',
-                                name=f'전세가({style["label"]})',
-                                line=dict(color=style['color'], width=style['width'], dash=style['dash']),
-                                hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
-                                              f'<b>전세가({style["label"]})</b>: %{{y:,.0f}}만원<br>' +
-                                              '<extra></extra>'
-                            ))
-
-            # ========== 3. PIR 데이터 정규화 (0-150 범위로 매핑) ==========
+            # ========== 1. PIR 데이터 정규화 (0-150 범위로 매핑) ==========
             # PIR 값의 범위를 가격 축의 0-150 범위로 정규화
             y_min = df['매매가'].min()
             y_max = df['매매가'].max()
@@ -8602,8 +8513,8 @@ class KBLandApp:
                         y=[t['price'] for t in high_floor_trades],
                         mode='markers',
                         name='실거래(5층↑)',
-                        marker=dict(color='#3498DB', size=8, opacity=0.6,
-                                   line=dict(color='white', width=1)),
+                        marker=dict(color='#3498DB', size=5, opacity=0.5,
+                                   line=dict(color='white', width=0.5)),
                         hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
                                       '<b>실거래가</b>: %{y:,.0f}만원<br>' +
                                       '<b>층</b>: ' +
@@ -8624,8 +8535,8 @@ class KBLandApp:
                         y=[t['price'] for t in low_floor_trades],
                         mode='markers',
                         name='실거래(4층↓)',
-                        marker=dict(color='#95A5A6', size=8, opacity=0.4,
-                                   line=dict(color='white', width=1)),
+                        marker=dict(color='#95A5A6', size=5, opacity=0.3,
+                                   line=dict(color='white', width=0.5)),
                         hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
                                       '<b>실거래가</b>: %{y:,.0f}만원<br>' +
                                       '<b>층</b>: %{customdata[0]}층<extra></extra>',
@@ -8639,8 +8550,8 @@ class KBLandApp:
                     y=[l['price'] for l in leases],
                     mode='markers',
                     name='전세실거래',
-                    marker=dict(color='#FFB366', size=6, opacity=0.5,
-                               symbol='diamond', line=dict(color='white', width=1)),
+                    marker=dict(color='#FFB366', size=4, opacity=0.4,
+                               symbol='diamond', line=dict(color='white', width=0.5)),
                     hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
                                   '<b>전세실거래</b>: %{y:,.0f}만원<br>' +
                                   '<b>층</b>: %{customdata[0]}층<extra></extra>',
@@ -8856,7 +8767,7 @@ class KBLandApp:
             plotly_fig.add_annotation(
                 x=max_sale_date,
                 y=max_sale_value,
-                text=f"최고 {max_sale_value:,.0f}만원",
+                text=f"최고 {max_sale_value:,.0f}만원<br>{max_sale_date.strftime('%Y-%m')}",
                 showarrow=True,
                 arrowhead=2,
                 arrowsize=1,
@@ -8878,7 +8789,7 @@ class KBLandApp:
             plotly_fig.add_annotation(
                 x=max_jeonse_date,
                 y=max_jeonse_value,
-                text=f"최고 {max_jeonse_value:,.0f}만원",
+                text=f"최고 {max_jeonse_value:,.0f}만원<br>{max_jeonse_date.strftime('%Y-%m')}",
                 showarrow=True,
                 arrowhead=2,
                 arrowsize=1,
@@ -8902,7 +8813,7 @@ class KBLandApp:
                 plotly_fig.add_annotation(
                     x=max_trade_date,
                     y=max_trade_price,
-                    text=f"실거래 최고<br>{max_trade_price:,.0f}만원<br>({max_trade_floor}층)",
+                    text=f"실거래 최고<br>{max_trade_date.strftime('%Y-%m')}<br>{max_trade_price:,.0f}만원<br>({max_trade_floor}층)",
                     showarrow=True,
                     arrowhead=2,
                     arrowsize=1,
@@ -8949,7 +8860,7 @@ class KBLandApp:
                         plotly_fig.add_annotation(
                             x=min_low_trade['date'],
                             y=min_low_trade['price'],
-                            text=f"최근 최저가(저층)<br>{min_low_trade['price']:,.0f}만원<br>({min_low_trade['floor']}층)",
+                            text=f"최근 최저가(저층)<br>{min_low_trade['date'].strftime('%Y-%m')}<br>{min_low_trade['price']:,.0f}만원<br>({min_low_trade['floor']}층)",
                             showarrow=True,
                             arrowhead=2,
                             arrowsize=1,
@@ -8968,7 +8879,7 @@ class KBLandApp:
                         plotly_fig.add_annotation(
                             x=min_high_trade['date'],
                             y=min_high_trade['price'],
-                            text=f"최근 최저가(중고층)<br>{min_high_trade['price']:,.0f}만원<br>({min_high_trade['floor']}층)",
+                            text=f"최근 최저가(중고층)<br>{min_high_trade['date'].strftime('%Y-%m')}<br>{min_high_trade['price']:,.0f}만원<br>({min_high_trade['floor']}층)",
                             showarrow=True,
                             arrowhead=2,
                             arrowsize=1,
@@ -9097,13 +9008,199 @@ class KBLandApp:
                     yanchor='top',
                     text=box['text'],
                     showarrow=False,
-                    font=dict(size=16, family='Arial', color='black', weight='bold'),  # 폰트 크기 16, 볼드
+                    font=dict(size=14, family='Malgun Gothic, Arial', color='#2C3E50'),  # 맑은고딕, 가독성 좋은 색상
                     align='left',
-                    bgcolor='rgba(255, 255, 255, 0.98)',  # 배경 거의 불투명
-                    bordercolor='#000000',  # 테두리 검은색
-                    borderwidth=3,  # 테두리 더 두껍게
-                    borderpad=15  # 패딩 더 크게
+                    bgcolor='rgba(248, 249, 250, 0.95)',  # 밝은 회색 배경
+                    bordercolor='#BDC3C7',  # 부드러운 회색 테두리
+                    borderwidth=2,  # 적당한 테두리
+                    borderpad=12  # 적당한 패딩
                 )
+
+            # ========== KB 매매가/전세가 그래프 - 가장 마지막에 추가하여 최상단 표시 ==========
+            # ========== 1. 매매가 라인 (KB 시세) - 선택된 모든 타입 그리기 ==========
+            if hasattr(self, 'show_kb_price') and self.show_kb_price.get():
+                # 선택된 매매가 타입들 가져오기
+                sale_types = [t for t, var in self.sale_price_types.items() if var.get()] if hasattr(self, 'sale_price_types') else ['normal']
+
+                # 각 타입별 색상과 스타일 정의 (모두 실선, 명암 차이)
+                sale_type_styles = {
+                    'low': {'color': '#5AA8E8', 'width': 3.5, 'dash': 'solid', 'label': '하위'},
+                    'normal': {'color': '#0066CC', 'width': 4, 'dash': 'solid', 'label': '일반'},
+                    'high': {'color': '#004080', 'width': 3.5, 'dash': 'solid', 'label': '상위'}
+                }
+
+                for sale_type in sale_types:
+                    col_name = f'매매가_{sale_type}'
+                    if col_name in df.columns:
+                        style = sale_type_styles.get(sale_type, {'color': '#0066CC', 'width': 3, 'dash': 'solid', 'label': sale_type})
+                        plotly_fig.add_trace(go.Scatter(
+                            x=df['date'],
+                            y=df[col_name],
+                            mode='lines',
+                            name=f'매매가({style["label"]})',
+                            line=dict(color=style['color'], width=style['width'], dash=style['dash']),
+                            hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
+                                          f'<b>매매가({style["label"]})</b>: %{{y:,.0f}}만원<br>' +
+                                          '<extra></extra>'
+                        ))
+
+            # ========== 2. 전세가 라인 (KB 시세) - 선택된 모든 타입 그리기 ==========
+            if hasattr(self, 'show_kb_price') and self.show_kb_price.get():
+                # 선택된 전세가 타입들 가져오기
+                lease_types = [t for t, var in self.lease_price_types.items() if var.get()] if hasattr(self, 'lease_price_types') else ['normal']
+
+                # 각 타입별 색상과 스타일 정의 (모두 실선, 명암 차이)
+                lease_type_styles = {
+                    'low': {'color': '#FFB366', 'width': 3.5, 'dash': 'solid', 'label': '하위'},
+                    'normal': {'color': '#FF6B00', 'width': 4, 'dash': 'solid', 'label': '일반'},
+                    'high': {'color': '#CC5500', 'width': 3.5, 'dash': 'solid', 'label': '상위'}
+                }
+
+                for lease_type in lease_types:
+                    col_name = f'전세가_{lease_type}'
+                    if col_name in df.columns:
+                        style = lease_type_styles.get(lease_type, {'color': '#FF6B00', 'width': 3, 'dash': 'solid', 'label': lease_type})
+
+                        # 선택된 모든 매매가 타입과의 갭 계산
+                        hover_template = '<b>날짜</b>: %{x|%Y-%m}<br>' + \
+                                       f'<b>전세가({style["label"]})</b>: %{{y:,.0f}}만원<br>'
+
+                        # 선택된 매매가 타입들 가져오기
+                        selected_sale_types = [t for t, var in self.sale_price_types.items() if var.get()] if hasattr(self, 'sale_price_types') else ['normal']
+
+                        # customdata를 위한 리스트들
+                        customdata_arrays = []
+                        customdata_idx = 0
+
+                        # 각 매매가 타입별로 갭 계산
+                        for sale_type in selected_sale_types:
+                            sale_col = f'매매가_{sale_type}'
+                            if sale_col in df.columns:
+                                gap = df[sale_col] - df[col_name]
+                                gap_rate = (gap / df[sale_col] * 100).round(1)
+                                customdata_arrays.append(gap)
+                                customdata_arrays.append(gap_rate)
+
+                                sale_label = sale_type_styles.get(sale_type, {}).get('label', sale_type)
+                                hover_template += f'<b>{sale_label}갭</b>: %{{customdata[{customdata_idx}]:,.0f}}만원 (%{{customdata[{customdata_idx+1}]:.1f}}%)<br>'
+                                customdata_idx += 2
+
+                        hover_template += '<extra></extra>'
+
+                        if customdata_arrays:
+                            # customdata를 DataFrame으로 변환
+                            import pandas as pd
+                            customdata_list = list(zip(*customdata_arrays))
+
+                            plotly_fig.add_trace(go.Scatter(
+                                x=df['date'],
+                                y=df[col_name],
+                                mode='lines',
+                                name=f'전세가({style["label"]})',
+                                line=dict(color=style['color'], width=style['width'], dash=style['dash']),
+                                customdata=customdata_list,
+                                hovertemplate=hover_template
+                            ))
+                        else:
+                            # 매매가 데이터가 없는 경우 기본 호버
+                            plotly_fig.add_trace(go.Scatter(
+                                x=df['date'],
+                                y=df[col_name],
+                                mode='lines',
+                                name=f'전세가({style["label"]})',
+                                line=dict(color=style['color'], width=style['width'], dash=style['dash']),
+                                hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
+                                              f'<b>전세가({style["label"]})</b>: %{{y:,.0f}}만원<br>' +
+                                              '<extra></extra>'
+                            ))
+
+            # ========== 2.5 KB 매매가/전세가 최근 가격 레이블 표시 ==========
+            if hasattr(self, 'show_kb_price') and self.show_kb_price.get() and len(df) > 0:
+                latest_date = df['date'].iloc[-1]
+
+                # 선택된 매매가/전세가 타입들 가져오기
+                sale_types = [t for t, var in self.sale_price_types.items() if var.get()] if hasattr(self, 'sale_price_types') else ['normal']
+                lease_types = [t for t, var in self.lease_price_types.items() if var.get()] if hasattr(self, 'lease_price_types') else ['normal']
+
+                # 매매가 타입별 스타일
+                sale_type_styles = {
+                    'low': {'color': '#5AA8E8', 'label': '하위평균'},
+                    'normal': {'color': '#0066CC', 'label': '일반'},
+                    'high': {'color': '#004080', 'label': '상위평균'}
+                }
+
+                # 전세가 타입별 스타일
+                lease_type_styles = {
+                    'low': {'color': '#FFB366', 'label': '하위평균'},
+                    'normal': {'color': '#FF6B00', 'label': '일반'},
+                    'high': {'color': '#CC5500', 'label': '상위평균'}
+                }
+
+                # 매매가 최근 가격 레이블 추가
+                ay_offset = -40  # 시작 위치 (위쪽)
+                for sale_type in sale_types:
+                    col_name = f'매매가_{sale_type}'
+                    if col_name in df.columns:
+                        current_sale = df[col_name].iloc[-1]
+                        max_sale = df[col_name].max()
+                        style = sale_type_styles.get(sale_type, {'color': '#0066CC', 'label': sale_type})
+
+                        # 현재가가 최고가인 경우 레이블 표시 안함 (오차 1만원 이내)
+                        is_peak = abs(current_sale - max_sale) < 1
+                        if is_peak:
+                            continue
+
+                        plotly_fig.add_annotation(
+                            x=latest_date,
+                            y=current_sale,
+                            text=f"매매 {style['label']}<br>{latest_date.strftime('%Y-%m')}<br>{current_sale:,.0f}만원",
+                            showarrow=True,
+                            arrowhead=2,
+                            arrowsize=1,
+                            arrowwidth=2,
+                            arrowcolor=style['color'],
+                            ax=40,
+                            ay=ay_offset,
+                            bgcolor='white',
+                            bordercolor=style['color'],
+                            borderwidth=2,
+                            borderpad=4,
+                            font=dict(size=10, color=style['color'], family='Malgun Gothic, Arial')
+                        )
+                        ay_offset += 40  # 다음 레이블은 아래로
+
+                # 전세가 최근 가격 레이블 추가
+                ay_offset = -40  # 시작 위치 (위쪽)
+                for lease_type in lease_types:
+                    col_name = f'전세가_{lease_type}'
+                    if col_name in df.columns:
+                        current_lease = df[col_name].iloc[-1]
+                        max_lease = df[col_name].max()
+                        style = lease_type_styles.get(lease_type, {'color': '#FF6B00', 'label': lease_type})
+
+                        # 현재가가 최고가인 경우 레이블 표시 안함 (오차 1만원 이내)
+                        is_peak = abs(current_lease - max_lease) < 1
+                        if is_peak:
+                            continue
+
+                        plotly_fig.add_annotation(
+                            x=latest_date,
+                            y=current_lease,
+                            text=f"전세 {style['label']}<br>{latest_date.strftime('%Y-%m')}<br>{current_lease:,.0f}만원",
+                            showarrow=True,
+                            arrowhead=2,
+                            arrowsize=1,
+                            arrowwidth=2,
+                            arrowcolor=style['color'],
+                            ax=40,
+                            ay=ay_offset,
+                            bgcolor='white',
+                            bordercolor=style['color'],
+                            borderwidth=2,
+                            borderpad=4,
+                            font=dict(size=10, color=style['color'], family='Malgun Gothic, Arial')
+                        )
+                        ay_offset += 40  # 다음 레이블은 아래로
 
             # ========== 레이아웃 설정 ==========
             # 제목 생성 (준공년도와 연식 포함)

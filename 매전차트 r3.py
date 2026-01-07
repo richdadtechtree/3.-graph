@@ -9089,7 +9089,6 @@ class KBLandApp:
 
                         if customdata_arrays:
                             # customdata를 DataFrame으로 변환
-                            import pandas as pd
                             customdata_list = list(zip(*customdata_arrays))
 
                             plotly_fig.add_trace(go.Scatter(
@@ -9418,6 +9417,75 @@ graphDiv.on('plotly_relayout', function(eventData) {{
 
             // 레이아웃 업데이트
             Plotly.relayout(graphDiv, {{annotations: filteredAnnotations}});
+        }}
+    }}
+}});
+
+// "모든 도형 삭제" 버튼 추가
+window.addEventListener('load', function() {{
+    const modebar = document.querySelector('.modebar-group');
+    if (modebar) {{
+        // 버튼 생성
+        const clearButton = document.createElement('a');
+        clearButton.className = 'modebar-btn';
+        clearButton.setAttribute('data-title', '모든 도형 삭제 (Ctrl+Shift+D)');
+        clearButton.innerHTML = `<svg viewBox="0 0 1000 1000" class="icon" height="1em" width="1em">
+            <path d="M500 450l-250-250-50 50 250 250-250 250 50 50 250-250 250 250 50-50-250-250 250-250-50-50z"
+                  fill="currentColor"></path>
+        </svg>`;
+        clearButton.style.cursor = 'pointer';
+
+        // 클릭 이벤트: 모든 도형과 계산 주석 삭제
+        clearButton.onclick = function() {{
+            Plotly.relayout(graphDiv, {{
+                'shapes': [],
+                'annotations': graphDiv.layout.annotations.filter(ann =>
+                    ann.text.includes('매매가(일반)') ||
+                    ann.text.includes('매매가(하위)') ||
+                    ann.text.includes('매매가(상위)') ? false : true
+                )
+            }});
+        }};
+
+        modebar.appendChild(clearButton);
+    }}
+}});
+
+// 키보드 단축키: Ctrl+Shift+D로 모든 도형 삭제
+document.addEventListener('keydown', function(e) {{
+    if (e.ctrlKey && e.shiftKey && e.key === 'D') {{
+        e.preventDefault();
+        Plotly.relayout(graphDiv, {{
+            'shapes': [],
+            'annotations': graphDiv.layout.annotations.filter(ann =>
+                ann.text.includes('매매가(일반)') ||
+                ann.text.includes('매매가(하위)') ||
+                ann.text.includes('매매가(상위)') ? false : true
+            )
+        }});
+    }}
+}});
+
+// 키보드 단축키: Delete 키로 마지막 도형 삭제
+document.addEventListener('keydown', function(e) {{
+    if (e.key === 'Delete' || e.key === 'Backspace') {{
+        const currentShapes = graphDiv.layout.shapes || [];
+        if (currentShapes.length > 0) {{
+            e.preventDefault();
+            const newShapes = currentShapes.slice(0, -1);
+
+            // 계산 주석도 제거
+            const currentAnnotations = graphDiv.layout.annotations || [];
+            const filteredAnnotations = currentAnnotations.filter(ann =>
+                !ann.text.includes('매매가(일반)') &&
+                !ann.text.includes('매매가(하위)') &&
+                !ann.text.includes('매매가(상위)')
+            );
+
+            Plotly.relayout(graphDiv, {{
+                'shapes': newShapes,
+                'annotations': filteredAnnotations
+            }});
         }}
     }}
 }});

@@ -1,0 +1,18 @@
+{
+  "download_path": "C:\\Users\\bbono\\Documents\\RealEstateAnalyzer",
+  "history_path": "C:\\Users\\bbono\\Documents\\RealEstateAnalyzer\\history",
+  "lawdong_path": "C:/law-dong/law-dong.txt",
+  "complex_info_path": "D:\\python work\\3. graph\\data\\complex_info.xlsx",
+  "trade_cache_path": null,
+  "graph_options": {
+    "show_monthly_avg": false,
+    "show_monthly_max": true,
+    "show_scatter_plot": true,
+    "show_jeonse": true,
+    "show_jeonse_monthly_avg": false,
+    "show_jeonse_monthly_max": true,
+    "show_jeonse_scatter_plot": true,
+    "show_complex_info": false,
+    "collect_jeonse_data": true
+  }
+}

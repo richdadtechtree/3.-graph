@@ -2835,39 +2835,44 @@ class KBLandApp:
             return None
     
     def show_complex_selection_dialog(self, complexes):
-        """여러 단지 중 선택하는 대화상자"""
+        """여러 단지 중 선택하는 대화상자 (다중 선택 지원)"""
         dialog = tk.Toplevel(self.root)
         dialog.title("단지 선택")
         dialog.attributes('-topmost', True)
-        
+
         width = 700
-        height = 400
+        height = 450
         screen_width = dialog.winfo_screenwidth()
         screen_height = dialog.winfo_screenheight()
         x = (screen_width - width) // 2
         y = (screen_height - height) // 2
         dialog.geometry(f"{width}x{height}+{x}+{y}")
-        
-        selected_complex_id = None
-        
+
+        selected_complex_ids = []  # 여러 개 선택 가능하도록 리스트로 변경
+
         frame = ttk.Frame(dialog, padding="10")
         frame.pack(fill='both', expand=True)
-        
+
+        # 안내 문구 (다중 선택 방법 포함)
         ttk.Label(frame, text="검색된 단지를 선택해주세요:",
-                 font=self.font_normal if hasattr(self, 'font_normal') else None).pack(pady=(0, 10))
-        
+                 font=self.font_normal if hasattr(self, 'font_normal') else None).pack(pady=(0, 5))
+        ttk.Label(frame, text="💡 Ctrl+클릭: 여러 단지 선택 | Shift+클릭: 범위 선택",
+                 font=('Malgun Gothic', 9), foreground='#666666').pack(pady=(0, 10))
+
         list_frame = ttk.Frame(frame)
         list_frame.pack(fill='both', expand=True)
-        
+
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side='right', fill='y')
-        
-        listbox = tk.Listbox(list_frame, 
+
+        # selectmode=tk.EXTENDED로 다중 선택 활성화
+        listbox = tk.Listbox(list_frame,
                             yscrollcommand=scrollbar.set,
+                            selectmode=tk.EXTENDED,  # 다중 선택 모드
                             font=self.font_normal if hasattr(self, 'font_normal') else ('Malgun Gothic', 10))
         listbox.pack(side='left', fill='both', expand=True)
         scrollbar.config(command=listbox.yview)
-        
+
         complex_map = {}
         for i, complex_info in enumerate(complexes):
             complex_name = complex_info.get('complexName', '')
@@ -2875,29 +2880,47 @@ class KBLandApp:
             complex_type = complex_info.get('type', '')
             # 타입 변환 (A01=아파트, A06=빌라/다세대 등)
             type_text = "아파트" if complex_type == "A01" else "빌라/다세대" if complex_type == "A06" else complex_type
-            
+
             display_text = f"{complex_name} | {type_text} | {address}"
             listbox.insert(tk.END, display_text)
-            complex_map[i] = str(complex_info.get('complexNumber'))
-        
+            complex_map[i] = {
+                'id': str(complex_info.get('complexNumber')),
+                'name': complex_name
+            }
+
+        # 선택 개수 표시 레이블
+        selection_label = ttk.Label(frame, text="선택된 단지: 0개", font=('Malgun Gothic', 9))
+        selection_label.pack(pady=(5, 0))
+
+        def update_selection_count(event=None):
+            count = len(listbox.curselection())
+            selection_label.config(text=f"선택된 단지: {count}개")
+
+        listbox.bind('<<ListboxSelect>>', update_selection_count)
+
         def on_select():
-            nonlocal selected_complex_id
+            nonlocal selected_complex_ids
             if listbox.curselection():
-                idx = listbox.curselection()[0]
-                selected_complex_id = complex_map[idx]
+                # 선택된 모든 항목의 ID를 리스트로 저장
+                selected_complex_ids = [complex_map[idx] for idx in listbox.curselection()]
                 dialog.destroy()
-        
+
         listbox.bind('<Double-Button-1>', lambda e: on_select())
-        
+
         button_frame = ttk.Frame(frame)
         button_frame.pack(fill='x', pady=(10, 0))
-        
-        ttk.Button(button_frame, text="선택", command=on_select).pack(side='right', padx=(5, 0))
+
+        ttk.Button(button_frame, text="선택 완료", command=on_select).pack(side='right', padx=(5, 0))
         ttk.Button(button_frame, text="취소", command=dialog.destroy).pack(side='right')
-        
+
         self.root.wait_window(dialog)
-        
-        return selected_complex_id
+
+        # 기존 호환성을 위해 단일 선택 시 단일 ID 반환, 다중 선택 시 리스트 반환
+        if len(selected_complex_ids) == 1:
+            return selected_complex_ids[0]['id']
+        elif len(selected_complex_ids) > 1:
+            return selected_complex_ids  # [{id, name}, {id, name}, ...]
+        return None
         
     def download_naver_data(self, complex_id, apt_name):
         """네이버 부동산 API 페이지를 직접 열어서 데이터 수집"""
@@ -5502,7 +5525,7 @@ class KBLandApp:
         
         if not found:
             dialog = AptSelectDialog(
-                self.root, 
+                self.root,
                 apt_list,
                 self.service_key,
                 sigungu_code,
@@ -5521,7 +5544,11 @@ class KBLandApp:
                     'apt_name': selected_apt_name,
                     'sigungu_code': sigungu_code
                 }
-        
+                # 다중 선택 시 dialog.result에서 이미 trades가 있으면 바로 반환
+                if trades:
+                    print(f"다중 선택 실거래가 데이터 반환: {len(trades)}건")
+                    return trades
+
         return self.get_trade_details(sigungu_code, dong, apt_name, target_area)
 
 
@@ -7262,7 +7289,13 @@ class KBLandApp:
                                 # ax2.axhline(y=20, color='red', linestyle='--', alpha=0.5, linewidth=1)
                                 
                                 # 차트 제목 즉시 업데이트
-                                ax1.set_title(chart_title + " + 유나심리차트", pad=20, fontsize=20, fontweight='bold')
+                                if 'chart_title' in dir() or 'chart_title' in locals():
+                                    ax1.set_title(chart_title + " + 유나심리차트", pad=20, fontsize=20, fontweight='bold')
+                                else:
+                                    # chart_title이 아직 정의되지 않은 경우 기본 제목 사용
+                                    current_title = ax1.get_title()
+                                    if current_title:
+                                        ax1.set_title(current_title + " + 유나심리차트", pad=20, fontsize=20, fontweight='bold')
 
                                 # 심리차트 범례를 ax2에 별도 표시 (가독성 개선)
                                 sentiment_lines = []
@@ -9037,10 +9070,10 @@ class KBLandApp:
                             x=df['date'],
                             y=df[col_name],
                             mode='lines',
-                            name=f'매매가({style["label"]})',
+                            name=f'KB시세 매매가({style["label"]})',
                             line=dict(color=style['color'], width=style['width'], dash=style['dash']),
                             hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
-                                          f'<b>매매가({style["label"]})</b>: %{{y:,.0f}}만원<br>' +
+                                          f'<b>KB시세 매매가({style["label"]})</b>: %{{y:,.0f}}만원<br>' +
                                           '<extra></extra>'
                         ))
 
@@ -9063,7 +9096,7 @@ class KBLandApp:
 
                         # 선택된 모든 매매가 타입과의 갭 계산
                         hover_template = '<b>날짜</b>: %{x|%Y-%m}<br>' + \
-                                       f'<b>전세가({style["label"]})</b>: %{{y:,.0f}}만원<br>'
+                                       f'<b>KB시세 전세가({style["label"]})</b>: %{{y:,.0f}}만원<br>'
 
                         # 선택된 매매가 타입들 가져오기
                         selected_sale_types = [t for t, var in self.sale_price_types.items() if var.get()] if hasattr(self, 'sale_price_types') else ['normal']
@@ -9095,7 +9128,7 @@ class KBLandApp:
                                 x=df['date'],
                                 y=df[col_name],
                                 mode='lines',
-                                name=f'전세가({style["label"]})',
+                                name=f'KB시세 전세가({style["label"]})',
                                 line=dict(color=style['color'], width=style['width'], dash=style['dash']),
                                 customdata=customdata_list,
                                 hovertemplate=hover_template
@@ -9106,10 +9139,10 @@ class KBLandApp:
                                 x=df['date'],
                                 y=df[col_name],
                                 mode='lines',
-                                name=f'전세가({style["label"]})',
+                                name=f'KB시세 전세가({style["label"]})',
                                 line=dict(color=style['color'], width=style['width'], dash=style['dash']),
                                 hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
-                                              f'<b>전세가({style["label"]})</b>: %{{y:,.0f}}만원<br>' +
+                                              f'<b>KB시세 전세가({style["label"]})</b>: %{{y:,.0f}}만원<br>' +
                                               '<extra></extra>'
                             ))
 
@@ -9352,7 +9385,7 @@ function calculatePriceChange(startIdx, endIdx, priceType, prices, isSale) {{
     const priceChangeRate = ((priceDiff / startPrice) * 100).toFixed(2);
 
     const typeLabel = priceType === 'normal' ? '일반' : (priceType === 'low' ? '하위' : '상위');
-    const priceLabel = isSale ? '매매가' : '전세가';
+    const priceLabel = isSale ? 'KB시세 매매가' : 'KB시세 전세가';
 
     let text = `<b>${{priceLabel}}(${{typeLabel}})</b><br>`;
     text += `${{kbData.dates[startIdx]}} → ${{kbData.dates[endIdx]}}<br>`;
@@ -9367,7 +9400,7 @@ function calculatePriceChange(startIdx, endIdx, priceType, prices, isSale) {{
     return text;
 }}
 
-// 모든 가격 변화 계산 (매매+전세)
+// 모든 가격 변화 계산 (매매+전세+매전갭)
 function calculateAllPriceChanges(startIdx, endIdx) {{
     let calculationText = '';
     let firstType = true;
@@ -9386,18 +9419,47 @@ function calculateAllPriceChanges(startIdx, endIdx) {{
         calculationText += calculatePriceChange(startIdx, endIdx, priceType, prices, false);
     }}
 
+    // 매전갭 변화 계산 (같은 타입끼리 비교)
+    for (const [priceType, salePrices] of Object.entries(kbData.salePrices || {{}})) {{
+        const leasePrices = (kbData.leasePrices || {{}})[priceType];
+        if (leasePrices) {{
+            const typeLabel = priceType === 'normal' ? '일반' : (priceType === 'low' ? '하위' : '상위');
+
+            // 시작/종료 시점의 매전갭
+            const startGap = salePrices[startIdx] - leasePrices[startIdx];
+            const endGap = salePrices[endIdx] - leasePrices[endIdx];
+            const gapDiff = endGap - startGap;
+            const gapChangeRate = ((gapDiff / startGap) * 100).toFixed(2);
+
+            if (!firstType) calculationText += '<br>';
+            firstType = false;
+
+            calculationText += `<b>매전갭(${{typeLabel}})</b><br>`;
+            calculationText += `${{startGap.toLocaleString()}}만원 → ${{endGap.toLocaleString()}}만원<br>`;
+
+            if (gapDiff >= 0) {{
+                calculationText += `<span style="color: #E67E22;">▲ ${{gapDiff.toLocaleString()}}만원 (↑${{gapChangeRate}}%)</span>`;
+            }} else {{
+                calculationText += `<span style="color: #27AE60;">▼ ${{Math.abs(gapDiff).toLocaleString()}}만원 (↓${{Math.abs(gapChangeRate)}}%)</span>`;
+            }}
+        }}
+    }}
+
     return calculationText;
 }}
 
 // 주석 필터링 함수 (가격 변화 주석 제거)
 function filterPriceAnnotations(annotations) {{
     return (annotations || []).filter(ann =>
-        !ann.text.includes('매매가(일반)') &&
-        !ann.text.includes('매매가(하위)') &&
-        !ann.text.includes('매매가(상위)') &&
-        !ann.text.includes('전세가(일반)') &&
-        !ann.text.includes('전세가(하위)') &&
-        !ann.text.includes('전세가(상위)') &&
+        !ann.text.includes('KB시세 매매가(일반)') &&
+        !ann.text.includes('KB시세 매매가(하위)') &&
+        !ann.text.includes('KB시세 매매가(상위)') &&
+        !ann.text.includes('KB시세 전세가(일반)') &&
+        !ann.text.includes('KB시세 전세가(하위)') &&
+        !ann.text.includes('KB시세 전세가(상위)') &&
+        !ann.text.includes('매전갭(일반)') &&
+        !ann.text.includes('매전갭(하위)') &&
+        !ann.text.includes('매전갭(상위)') &&
         !ann.text.includes('📍 첫 번째 지점')
     );
 }}
@@ -10268,60 +10330,79 @@ class AptSelectDialog:
         self.apt_list = apt_list
         self.result = None
         self.selected_apt = None
+        self.selected_apts = []  # 다중 선택용 리스트
         self.trade_data = {}
-        
+
         self.top = tk.Toplevel(parent)
         self.top.title(title)
         self.top.attributes('-topmost', True)
-        
+
         # 창 크기와 위치 설정
         width = 800
-        height = 500
+        height = 550
         screen_width = self.top.winfo_screenwidth()
         screen_height = self.top.winfo_screenheight()
         x = (screen_width - width) // 2
         y = (screen_height - height) // 2
         self.top.geometry(f"{width}x{height}+{x}+{y}")
-        
+
         # 부모의 폰트 가져오기
         if hasattr(parent, 'font_normal'):
             self.font_normal = parent.font_normal
             self.font_large = parent.font_large
             self.font_title = parent.font_title
             self.font_button = parent.font_button
-        
+
         # 검색창 프레임
         search_frame = ttk.Frame(self.top, padding="5")
         search_frame.pack(fill='x', padx=5, pady=5)
-        
+
         # 폰트 적용
-        ttk.Label(search_frame, text="검색:", 
+        ttk.Label(search_frame, text="검색:",
                  font=self.font_normal if hasattr(self, 'font_normal') else None).pack(side='left')
-        
+
         self.search_var = tk.StringVar()
         self.search_var.trace('w', self.filter_apartments)
         search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=40,
                                font=self.font_normal if hasattr(self, 'font_normal') else None)
         search_entry.pack(side='left', fill='x', expand=True, padx=5)
-        
+
+        # 다중 선택 안내
+        ttk.Label(search_frame, text="💡 Ctrl+클릭: 다중 선택",
+                 font=('Malgun Gothic', 9), foreground='#666666').pack(side='right', padx=5)
+
         # 리스트박스 프레임
         list_frame = ttk.Frame(self.top, padding="5")
         list_frame.pack(fill='both', expand=True, padx=5, pady=5)
-        
+
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side='right', fill='y')
-        
-        # 리스트박스에 폰트 적용
-        self.listbox = tk.Listbox(list_frame, 
+
+        # 리스트박스에 다중 선택 모드 추가
+        self.listbox = tk.Listbox(list_frame,
                                 yscrollcommand=scrollbar.set,
+                                selectmode=tk.EXTENDED,  # 다중 선택 모드
                                 font=self.font_normal if hasattr(self, 'font_normal') else ('KoPubWorld Dotum Medium', 10))
         self.listbox.pack(fill='both', expand=True)
         scrollbar.config(command=self.listbox.yview)
-        
+
         # 아파트 목록 초기화
         self.update_listbox(apt_list)
-        
-        self.listbox.bind('<ButtonRelease-1>', self.on_select)
+
+        # 선택 개수 표시 및 버튼 프레임
+        bottom_frame = ttk.Frame(self.top, padding="5")
+        bottom_frame.pack(fill='x', padx=5, pady=5)
+
+        self.selection_label = ttk.Label(bottom_frame, text="선택된 단지: 0개", font=('Malgun Gothic', 9))
+        self.selection_label.pack(side='left')
+
+        ttk.Button(bottom_frame, text="선택 완료", command=self.on_confirm_selection).pack(side='right', padx=5)
+        ttk.Button(bottom_frame, text="취소", command=self.top.destroy).pack(side='right')
+
+        # 선택 변경 시 개수 업데이트
+        self.listbox.bind('<<ListboxSelect>>', self.update_selection_count)
+        # 더블 클릭 시 단일 선택으로 바로 진행
+        self.listbox.bind('<Double-Button-1>', self.on_double_click)
 
     def update_listbox(self, items):
         self.listbox.delete(0, tk.END)
@@ -10332,18 +10413,61 @@ class AptSelectDialog:
         search_text = self.search_var.get().lower()
         filtered_list = [apt for apt in self.apt_list if search_text in apt.lower()]
         self.update_listbox(filtered_list)
-    
-    def on_select(self, event):
+
+    def update_selection_count(self, event=None):
+        """선택된 단지 개수 업데이트"""
+        count = len(self.listbox.curselection())
+        self.selection_label.config(text=f"선택된 단지: {count}개")
+
+    def on_double_click(self, event):
+        """더블 클릭 시 단일 선택으로 바로 진행"""
         if self.listbox.curselection():
-            full_text = self.listbox.get(self.listbox.curselection())
-            # '[' 와 ']' 사이의 주소 정보 추출
+            self.process_single_selection(self.listbox.curselection()[0])
+
+    def on_confirm_selection(self):
+        """선택 완료 버튼 클릭 시"""
+        selections = self.listbox.curselection()
+        if not selections:
+            return
+
+        if len(selections) == 1:
+            # 단일 선택
+            self.process_single_selection(selections[0])
+        else:
+            # 다중 선택
+            self.process_multiple_selections(selections)
+
+    def process_single_selection(self, idx):
+        """단일 선택 처리"""
+        full_text = self.listbox.get(idx)
+        # '[' 와 ']' 사이의 주소 정보 추출
+        address_info = full_text[full_text.find('[')+1:full_text.find(']')]
+        # 도로명 주소와 지번 주소 분리
+        jibun_addr = address_info.split(' / ')[1]  # 지번 주소만 사용
+        # 지번 주소에서 동과 번지만 추출
+        self.simple_addr = ' '.join(jibun_addr.split()[-2:])  # 동 번지
+        self.selected_apt = full_text.split('[')[0].strip()
+        self.show_area_dialog()
+
+    def process_multiple_selections(self, selections):
+        """다중 선택 처리 - 여러 단지의 실거래가를 합침"""
+        self.selected_apts = []
+        for idx in selections:
+            full_text = self.listbox.get(idx)
             address_info = full_text[full_text.find('[')+1:full_text.find(']')]
-            # 도로명 주소와 지번 주소 분리
-            jibun_addr = address_info.split(' / ')[1]  # 지번 주소만 사용
-            # 지번 주소에서 동과 번지만 추출
-            self.simple_addr = ' '.join(jibun_addr.split()[-2:])  # 동 번지
-            self.selected_apt = full_text.split('[')[0].strip()
-            self.show_area_dialog()
+            jibun_addr = address_info.split(' / ')[1]
+            simple_addr = ' '.join(jibun_addr.split()[-2:])
+            apt_name = full_text.split('[')[0].strip()
+            self.selected_apts.append({
+                'apt_name': apt_name,
+                'simple_addr': simple_addr,
+                'full_text': full_text
+            })
+
+        # 첫 번째 단지 기준으로 면적 선택 후 모든 단지 조회
+        self.selected_apt = self.selected_apts[0]['apt_name']
+        self.simple_addr = self.selected_apts[0]['simple_addr']
+        self.show_area_dialog_for_multiple()
     
     def show_area_dialog(self):
         area_list = self.get_areas_for_apt(self.selected_apt)
@@ -10399,14 +10523,174 @@ class AptSelectDialog:
                 selected_area = listbox.get(listbox.curselection())
                 area_value = selected_area.replace('㎡', '').strip()
                 search_text = f"{self.simple_addr}"
-                trades = self.trade_data.get(area_value, [])
-                self.result = (search_text, self.selected_apt, area_value, trades)
+                # trades를 전달하지 않음 - get_trade_details에서 20년치 전체 데이터 조회
+                self.result = (search_text, self.selected_apt, area_value, None)
                 area_dialog.destroy()
                 self.top.destroy()
-        
+
         listbox.bind('<ButtonRelease-1>', on_area_select)
 
-        
+    def show_area_dialog_for_multiple(self):
+        """다중 선택 시 면적 선택 후 해당 면적이 있는 단지만 실거래가 조회"""
+        # 모든 선택된 단지의 면적 수집 및 단지별 면적 매핑
+        all_areas = set()
+        apt_areas_map = {}  # {면적: [해당 면적이 있는 단지 리스트]}
+
+        print(f"\n=== 다중 선택 면적 조회 ({len(self.selected_apts)}개 단지) ===")
+        for apt_info in self.selected_apts:
+            apt_name = apt_info['apt_name']
+            areas = self.get_areas_for_apt(apt_name)
+            print(f"  - {apt_name}: {areas}")
+
+            for area in areas:
+                all_areas.add(area)
+                if area not in apt_areas_map:
+                    apt_areas_map[area] = []
+                apt_areas_map[area].append(apt_info)
+
+        if not all_areas:
+            error_dialog = tk.Toplevel(self.top)
+            error_dialog.title("알림")
+            error_dialog.attributes('-topmost', True)
+            error_dialog.transient(self.top)
+
+            ttk.Label(error_dialog,
+                     text="선택된 아파트들의 전용면적 정보를 찾을 수 없습니다.",
+                     padding=20,
+                     font=self.font_normal if hasattr(self, 'font_normal') else None).pack()
+
+            ttk.Button(error_dialog,
+                      text="확인",
+                      command=error_dialog.destroy).pack(pady=10)
+
+            error_dialog.geometry(f"+{self.top.winfo_x() + 50}+{self.top.winfo_y() + 50}")
+            error_dialog.grab_set()
+            return
+
+        area_dialog = tk.Toplevel(self.top)
+        area_dialog.title(f"다중 선택 ({len(self.selected_apts)}개 단지) - 전용면적 선택")
+        area_dialog.attributes('-topmost', True)
+
+        width = 450
+        height = 300
+        x = self.top.winfo_x() + 50
+        y = self.top.winfo_y() + 50
+        area_dialog.geometry(f"{width}x{height}+{x}+{y}")
+
+        # 선택된 단지 목록 표시
+        info_frame = ttk.Frame(area_dialog, padding="5")
+        info_frame.pack(fill='x', padx=5, pady=5)
+
+        apt_names = [apt['apt_name'] for apt in self.selected_apts]
+        ttk.Label(info_frame, text=f"선택된 단지: {', '.join(apt_names)}",
+                 font=('Malgun Gothic', 9), wraplength=420).pack(anchor='w')
+
+        list_frame = ttk.Frame(area_dialog, padding="5")
+        list_frame.pack(fill='both', expand=True, padx=5, pady=5)
+
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side='right', fill='y')
+
+        listbox = tk.Listbox(list_frame,
+                          yscrollcommand=scrollbar.set,
+                          font=self.font_normal if hasattr(self, 'font_normal') else ('KoPubWorld Dotum Medium', 11))
+        listbox.pack(fill='both', expand=True)
+        scrollbar.config(command=listbox.yview)
+
+        # 면적별로 해당 단지 수 표시
+        area_to_index = {}  # listbox index -> area value 매핑
+        for idx, area in enumerate(sorted(all_areas, key=lambda x: float(x))):
+            apt_count = len(apt_areas_map[area])
+            apt_names_for_area = [apt['apt_name'] for apt in apt_areas_map[area]]
+            if apt_count == len(self.selected_apts):
+                listbox.insert(tk.END, f"{area}㎡ (전체 {apt_count}개 단지)")
+            else:
+                listbox.insert(tk.END, f"{area}㎡ ({apt_count}개: {', '.join(apt_names_for_area)})")
+            area_to_index[idx] = area
+
+        def on_area_select(event):
+            if listbox.curselection():
+                idx = listbox.curselection()[0]
+                area_value = area_to_index[idx]
+
+                # 해당 면적이 있는 단지만 조회
+                apts_with_area = apt_areas_map[area_value]
+
+                all_trades = []
+                queried_apt_names = []
+                print(f"\n=== 면적 {area_value}㎡ 실거래 조회 ===")
+                for apt_info in apts_with_area:
+                    apt_name = apt_info['apt_name']
+                    apt_trades = self.get_trades_for_apt(apt_name, area_value)
+                    if apt_trades:
+                        all_trades.extend(apt_trades)
+                        queried_apt_names.append(apt_name)
+                        print(f"  - {apt_name}: {len(apt_trades)}건")
+
+                print(f"총 실거래 데이터: {len(all_trades)}건 ({len(apts_with_area)}개 단지)")
+
+                # 결과 저장 (실제 조회한 단지만 이름에 포함)
+                combined_apt_name = ' + '.join(queried_apt_names) if queried_apt_names else ' + '.join([apt['apt_name'] for apt in apts_with_area])
+                search_text = f"{self.simple_addr}"
+                self.result = (search_text, combined_apt_name, area_value, all_trades)
+                area_dialog.destroy()
+                self.top.destroy()
+
+        listbox.bind('<ButtonRelease-1>', on_area_select)
+
+    def get_trades_for_apt(self, apt_name, target_area):
+        """특정 아파트의 실거래가 조회"""
+        trades = []
+        current_date = datetime.now()
+        target_area_float = float(target_area)
+
+        for i in range(240):  # 20년치
+            search_date = current_date - timedelta(days=30*i)
+            deal_ymd = search_date.strftime("%Y%m")
+
+            url = (f"http://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade"
+                   f"?serviceKey={self.service_key}"
+                   f"&LAWD_CD={self.sigungu_code}"
+                   f"&DEAL_YMD={deal_ymd}"
+                   f"&numOfRows=1000")
+
+            try:
+                response = requests.get(url)
+                if response.status_code == 200:
+                    root = ET.fromstring(response.text)
+                    items = root.findall('.//item')
+
+                    for item in items:
+                        item_apt = item.findtext('aptNm', '').strip()
+                        item_dong = item.findtext('umdNm', '').strip()
+                        area = float(item.findtext('excluUseAr', '0'))
+
+                        # 면적 허용 오차 ±1
+                        if (item_apt == apt_name and
+                            item_dong == self.dong and
+                            abs(area - target_area_float) <= 1):
+                            try:
+                                floor = int(item.findtext('floor', '0'))
+                            except:
+                                floor = 0
+
+                            trade = {
+                                'date': datetime(
+                                    int(item.findtext('dealYear')),
+                                    int(item.findtext('dealMonth')),
+                                    1
+                                ),
+                                'price': int(item.findtext('dealAmount', '0').replace(',', '')),
+                                'floor': floor,
+                                'apt_name': apt_name  # 단지명 추가
+                            }
+                            trades.append(trade)
+            except Exception as e:
+                print(f"실거래가 조회 오류: {e}")
+                continue
+
+        return trades
+
     def get_areas_for_apt(self, apt_name):
         areas = set()
         trades = []  # 실거래 데이터 수집

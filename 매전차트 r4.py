@@ -9445,6 +9445,43 @@ function calculateAllPriceChanges(startIdx, endIdx) {{
         }}
     }}
 
+    // 투자금 대비 수익률 계산 (일반 매전갭 기준으로 상위가/일반가 수익률)
+    const normalSalePrices = (kbData.salePrices || {{}})['normal'];
+    const normalLeasePrices = (kbData.leasePrices || {{}})['normal'];
+    const highSalePrices = (kbData.salePrices || {{}})['high'];
+
+    if (normalSalePrices && normalLeasePrices) {{
+        const startGap = normalSalePrices[startIdx] - normalLeasePrices[startIdx];  // 시작점 일반 매전갭 (투자금)
+
+        if (startGap > 0) {{
+            let roiTexts = [];
+
+            // 상위가 변동 수익률
+            if (highSalePrices) {{
+                const highPriceDiff = highSalePrices[endIdx] - highSalePrices[startIdx];
+                const highRoi = ((highPriceDiff / startGap) * 100).toFixed(1);
+                if (highPriceDiff >= 0) {{
+                    roiTexts.push(`상위: <span style="color: red;">+${{highRoi}}%</span>`);
+                }} else {{
+                    roiTexts.push(`상위: <span style="color: blue;">${{highRoi}}%</span>`);
+                }}
+            }}
+
+            // 일반가 변동 수익률
+            const normalPriceDiff = normalSalePrices[endIdx] - normalSalePrices[startIdx];
+            const normalRoi = ((normalPriceDiff / startGap) * 100).toFixed(1);
+            if (normalPriceDiff >= 0) {{
+                roiTexts.push(`일반: <span style="color: red;">+${{normalRoi}}%</span>`);
+            }} else {{
+                roiTexts.push(`일반: <span style="color: blue;">${{normalRoi}}%</span>`);
+            }}
+
+            calculationText += '<br><b>💰 투자금 대비 수익률</b><br>';
+            calculationText += `<span style="font-size:11px;">(매매가 변동 ÷ 시작점 일반 매전갭 ${{startGap.toLocaleString()}}만원)</span><br>`;
+            calculationText += roiTexts.join(' | ');
+        }}
+    }}
+
     return calculationText;
 }}
 

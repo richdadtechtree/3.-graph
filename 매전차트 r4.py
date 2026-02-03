@@ -7717,14 +7717,14 @@ class KBLandApp:
                 if high_trades:
                     dates_high = [t['date'] for t in high_trades]
                     prices_high = [t['price'] for t in high_trades]
-                    ax1.scatter(dates_high, prices_high, color=high_floor_color, alpha=0.4,
+                    ax1.scatter(dates_high, prices_high, color=high_floor_color, alpha=0.6,
                                s=50, edgecolors='white', linewidths=0.5,
                                label='실거래(5층↑)', zorder=2)
 
                 if low_trades:
                     dates_low = [t['date'] for t in low_trades]
                     prices_low = [t['price'] for t in low_trades]
-                    ax1.scatter(dates_low, prices_low, color=low_floor_color, alpha=0.4,
+                    ax1.scatter(dates_low, prices_low, color=low_floor_color, alpha=0.6,
                                s=50, edgecolors='white', linewidths=0.5,
                                label='실거래(4층↓)', zorder=2)
         
@@ -9445,6 +9445,28 @@ function calculateAllPriceChanges(startIdx, endIdx) {{
         }}
     }}
 
+    // 매전 상위 계산 (매매 상위 - 전세 일반)
+    const highSalePricesForGap = (kbData.salePrices || {{}})['high'];
+    const normalLeasePricesForGap = (kbData.leasePrices || {{}})['normal'];
+    if (highSalePricesForGap && normalLeasePricesForGap) {{
+        const startGapMix = highSalePricesForGap[startIdx] - normalLeasePricesForGap[startIdx];
+        const endGapMix = highSalePricesForGap[endIdx] - normalLeasePricesForGap[endIdx];
+        const gapDiffMix = endGapMix - startGapMix;
+        const gapChangeRateMix = ((gapDiffMix / startGapMix) * 100).toFixed(2);
+
+        if (!firstType) calculationText += '<br>';
+        firstType = false;
+
+        calculationText += `<b>매전 상위</b><span style="font-size:10px;">(매매상위-전세일반)</span><br>`;
+        calculationText += `${{startGapMix.toLocaleString()}}만원 → ${{endGapMix.toLocaleString()}}만원<br>`;
+
+        if (gapDiffMix >= 0) {{
+            calculationText += `<span style="color: #E67E22;">▲ ${{gapDiffMix.toLocaleString()}}만원 (↑${{gapChangeRateMix}}%)</span>`;
+        }} else {{
+            calculationText += `<span style="color: #27AE60;">▼ ${{Math.abs(gapDiffMix).toLocaleString()}}만원 (↓${{Math.abs(gapChangeRateMix)}}%)</span>`;
+        }}
+    }}
+
     // 투자금 대비 수익률 계산 (일반 매전갭 기준으로 상위가/일반가 수익률)
     const normalSalePrices = (kbData.salePrices || {{}})['normal'];
     const normalLeasePrices = (kbData.leasePrices || {{}})['normal'];
@@ -9497,6 +9519,7 @@ function filterPriceAnnotations(annotations) {{
         !ann.text.includes('매전갭(일반)') &&
         !ann.text.includes('매전갭(하위)') &&
         !ann.text.includes('매전갭(상위)') &&
+        !ann.text.includes('매전 상위') &&
         !ann.text.includes('📍 첫 번째 지점')
     );
 }}

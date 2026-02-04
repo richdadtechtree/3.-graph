@@ -7717,14 +7717,14 @@ class KBLandApp:
                 if high_trades:
                     dates_high = [t['date'] for t in high_trades]
                     prices_high = [t['price'] for t in high_trades]
-                    ax1.scatter(dates_high, prices_high, color=high_floor_color, alpha=0.6,
+                    ax1.scatter(dates_high, prices_high, color=high_floor_color, alpha=0.8,
                                s=50, edgecolors='white', linewidths=0.5,
                                label='실거래(5층↑)', zorder=2)
 
                 if low_trades:
                     dates_low = [t['date'] for t in low_trades]
                     prices_low = [t['price'] for t in low_trades]
-                    ax1.scatter(dates_low, prices_low, color=low_floor_color, alpha=0.6,
+                    ax1.scatter(dates_low, prices_low, color=low_floor_color, alpha=0.8,
                                s=50, edgecolors='white', linewidths=0.5,
                                label='실거래(4층↓)', zorder=2)
         
@@ -9278,7 +9278,7 @@ class KBLandApp:
                     bgcolor='rgba(255,255,255,0.8)'
                 ),
                 height=1100,  # 텍스트 박스 공간 확보를 위해 높이 증가
-                margin=dict(r=100, b=320),  # 하단 여백 더 증가 (텍스트 박스가 잘리지 않도록)
+                margin=dict(r=180, b=320),  # 오른쪽 여백 증가 (modebar가 y축 제목 가리지 않도록)
                 # 그리기 도구 설정
                 newshape=dict(
                     line=dict(color='red', width=3),  # 기본 선 색상 및 두께
@@ -9524,71 +9524,8 @@ function filterPriceAnnotations(annotations) {{
     );
 }}
 
-// 선이 그려질 때마다 자동 계산
+// 그래프 요소 참조
 var graphDiv = document.getElementsByClassName('plotly-graph-div')[0];
-
-graphDiv.on('plotly_relayout', function(eventData) {{
-    // 새로운 도형이 추가되었는지 확인 (선 그리기)
-    if (eventData['shapes']) {{
-        const shapes = eventData['shapes'];
-        const lastShape = shapes[shapes.length - 1];
-
-        // 선(line)인 경우에만 처리
-        if (lastShape && lastShape.type === 'line') {{
-            const x0 = lastShape.x0;
-            const x1 = lastShape.x1;
-
-            // 날짜 문자열 추출 (YYYY-MM-DD 형식으로 변환)
-            const startDate = new Date(x0).toISOString().split('T')[0];
-            const endDate = new Date(x1).toISOString().split('T')[0];
-
-            // 가장 가까운 데이터 포인트 찾기
-            const startIdx = findNearestDataPoint(startDate);
-            const endIdx = findNearestDataPoint(endDate);
-
-            // 모든 가격 변화 계산
-            const calculationText = calculateAllPriceChanges(startIdx, endIdx);
-
-            // 선의 중간 지점에 주석 추가
-            const midX = new Date((new Date(x0).getTime() + new Date(x1).getTime()) / 2);
-            const midY = (lastShape.y0 + lastShape.y1) / 2;
-
-            // 기존 주석 유지 (새로운 계산 결과 추가)
-            const currentAnnotations = graphDiv.layout.annotations || [];
-
-            // 중복 체크: 동일한 내용의 주석이 이미 있으면 추가하지 않음
-            const isDuplicate = currentAnnotations.some(ann => ann.text === calculationText);
-            if (isDuplicate) return;
-
-            // 새로운 주석 추가
-            currentAnnotations.push({{
-                x: midX,
-                y: midY,
-                text: calculationText,
-                showarrow: true,
-                arrowhead: 2,
-                arrowsize: 1,
-                arrowwidth: 2,
-                arrowcolor: '#E74C3C',
-                ax: 0,
-                ay: -80,
-                bgcolor: 'rgba(255, 255, 255, 0.95)',
-                bordercolor: '#E74C3C',
-                borderwidth: 2,
-                borderpad: 8,
-                font: {{
-                    size: 12,
-                    color: '#2C3E50',
-                    family: 'Malgun Gothic, Arial'
-                }},
-                align: 'left'
-            }});
-
-            // 레이아웃 업데이트
-            Plotly.relayout(graphDiv, {{annotations: currentAnnotations}});
-        }}
-    }}
-}});
 
 // ========== 그래프 클릭으로 기간별 변화 확인 기능 ==========
 // 클릭한 날짜에서 대표 KB시세 가격 가져오기 (매매가 우선)
@@ -9850,6 +9787,50 @@ window.addEventListener('load', function() {{
         }};
 
         modebar.appendChild(clearButton);
+
+        // ========== 선 색상 선택 드롭다운 ==========
+        const colorContainer = document.createElement('div');
+        colorContainer.style.cssText = 'display: inline-flex; align-items: center; margin-left: 10px; position: relative;';
+
+        const colorLabel = document.createElement('span');
+        colorLabel.textContent = '선 색상:';
+        colorLabel.style.cssText = 'font-size: 12px; color: #506784; margin-right: 5px;';
+
+        const colorSelect = document.createElement('select');
+        colorSelect.id = 'line-color-select';
+        colorSelect.style.cssText = 'padding: 3px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; cursor: pointer; background: white;';
+
+        const colors = [
+            {{ value: 'red', label: '🔴 빨강', color: '#E74C3C' }},
+            {{ value: 'blue', label: '🔵 파랑', color: '#3498DB' }},
+            {{ value: 'green', label: '🟢 초록', color: '#27AE60' }},
+            {{ value: 'orange', label: '🟠 주황', color: '#E67E22' }},
+            {{ value: 'purple', label: '🟣 보라', color: '#9B59B6' }},
+            {{ value: 'black', label: '⚫ 검정', color: '#2C3E50' }},
+            {{ value: 'yellow', label: '🟡 노랑', color: '#F1C40F' }},
+            {{ value: 'pink', label: '🩷 분홍', color: '#E91E63' }}
+        ];
+
+        colors.forEach(c => {{
+            const option = document.createElement('option');
+            option.value = c.color;
+            option.textContent = c.label;
+            option.style.color = c.color;
+            colorSelect.appendChild(option);
+        }});
+
+        // 색상 변경 시 newshape 업데이트
+        colorSelect.addEventListener('change', function() {{
+            const selectedColor = this.value;
+            Plotly.relayout(graphDiv, {{
+                'newshape.line.color': selectedColor,
+                'newshape.fillcolor': selectedColor.replace(')', ', 0.2)').replace('rgb', 'rgba')
+            }});
+        }});
+
+        colorContainer.appendChild(colorLabel);
+        colorContainer.appendChild(colorSelect);
+        modebar.parentElement.appendChild(colorContainer);
     }}
 }});
 
@@ -9886,7 +9867,7 @@ document.addEventListener('keydown', function(e) {{
 
 // 안내 메시지 표시
 console.log('📊 그래프 사용 안내:');
-console.log('  - Draw Line 도구: 선을 그려서 기간별 매매/전세 변화 확인');
+console.log('  - Draw Line 도구: 자유롭게 선/도형 그리기 (색상 선택 가능)');
 console.log('  - C 키: 클릭 비교 모드 ON/OFF (그래프를 두 번 클릭하여 기간별 변화 확인)');
 console.log('  - ESC: 클릭 선택 취소');
 console.log('  - Delete: 마지막 도형 삭제');

@@ -9783,12 +9783,16 @@ window.addEventListener('load', function() {{
         </svg>`;
         clearButton.style.cursor = 'pointer';
 
-        // 클릭 이벤트: 모든 도형과 계산 주석 삭제
+        // 클릭 이벤트: 모든 도형과 계산 주석 삭제 (매물선 포함)
         clearButton.onclick = function() {{
             clickSelectionState = {{ firstClick: null, isWaiting: false }};
             Plotly.relayout(graphDiv, {{
                 'shapes': [],
-                'annotations': filterPriceAnnotations(graphDiv.layout.annotations).filter(ann => ann.name !== 'clickModeGuide')
+                'annotations': filterPriceAnnotations(graphDiv.layout.annotations).filter(ann =>
+                    ann.name !== 'clickModeGuide' &&
+                    ann.name !== 'hline_sale_label' &&
+                    ann.name !== 'hline_lease_label'
+                )
             }});
         }};
 
@@ -9837,17 +9841,291 @@ window.addEventListener('load', function() {{
         colorContainer.appendChild(colorLabel);
         colorContainer.appendChild(colorSelect);
         modebar.parentElement.appendChild(colorContainer);
+
+        // ========== 매물 범위선 플로팅 패널 ==========
+        const hlinePanel = document.createElement('div');
+        hlinePanel.id = 'hline-panel';
+        hlinePanel.style.cssText = 'position: fixed; top: 80px; right: 30px; z-index: 9999; background: rgba(255,255,255,0.97); border: 2px solid #3498DB; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); padding: 0; min-width: 280px; user-select: none;';
+
+        // 헤더 (드래그 핸들)
+        const hlineHeader = document.createElement('div');
+        hlineHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: linear-gradient(135deg, #3498DB, #2980B9); border-radius: 8px 8px 0 0; cursor: move;';
+
+        const hlineTitleEl = document.createElement('span');
+        hlineTitleEl.textContent = '📏 매물 범위선';
+        hlineTitleEl.style.cssText = 'font-size: 13px; color: white; font-weight: bold;';
+
+        const minimizeBtn = document.createElement('span');
+        minimizeBtn.textContent = '—';
+        minimizeBtn.style.cssText = 'color: white; cursor: pointer; font-size: 16px; font-weight: bold; padding: 0 4px; line-height: 1;';
+        let panelMinimized = false;
+
+        hlineHeader.appendChild(hlineTitleEl);
+        hlineHeader.appendChild(minimizeBtn);
+
+        // 본문 영역
+        const hlineBody = document.createElement('div');
+        hlineBody.style.cssText = 'padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;';
+
+        // --- 만원 → 한글 변환 ---
+        function toKoreanPrice(val) {{
+            const n = parseInt(val);
+            if (isNaN(n) || n === 0) return '';
+            const eok = Math.floor(n / 10000);
+            const man = n % 10000;
+            let result = '';
+            if (eok > 0) result += eok.toLocaleString() + '억';
+            if (man > 0) result += (eok > 0 ? ' ' : '') + man.toLocaleString() + '만';
+            return result + '원';
+        }}
+
+        // --- 행 생성 헬퍼 ---
+        function createRangeRow(label, borderColor, defaultColor1, defaultColor2) {{
+            const row = document.createElement('div');
+            row.style.cssText = 'display: flex; flex-direction: column; gap: 3px;';
+
+            const inputRow = document.createElement('div');
+            inputRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+
+            const lbl = document.createElement('span');
+            lbl.textContent = label;
+            lbl.style.cssText = 'font-size: 12px; font-weight: bold; color: #2C3E50; min-width: 32px;';
+
+            const inp1 = document.createElement('input');
+            inp1.type = 'number';
+            inp1.placeholder = '상한';
+            inp1.style.cssText = `width: 72px; padding: 4px 5px; border: 2px solid ${{borderColor}}; border-radius: 4px; font-size: 12px; text-align: right;`;
+
+            const unit1 = document.createElement('span');
+            unit1.textContent = '만원';
+            unit1.style.cssText = 'font-size: 10px; color: #888; margin-left: -4px;';
+
+            const tilde = document.createElement('span');
+            tilde.textContent = '~';
+            tilde.style.cssText = 'font-size: 13px; color: #888;';
+
+            const inp2 = document.createElement('input');
+            inp2.type = 'number';
+            inp2.placeholder = '하한';
+            inp2.style.cssText = `width: 72px; padding: 4px 5px; border: 2px solid ${{borderColor}}; border-radius: 4px; font-size: 12px; text-align: right;`;
+
+            const unit2 = document.createElement('span');
+            unit2.textContent = '만원';
+            unit2.style.cssText = 'font-size: 10px; color: #888; margin-left: -4px;';
+
+            const colorSel = document.createElement('select');
+            colorSel.style.cssText = 'padding: 3px 2px; border: 1px solid #ccc; border-radius: 4px; font-size: 11px; cursor: pointer;';
+            [['#3498DB', '🔵'], ['#E67E22', '🟠'], ['#E74C3C', '🔴'], ['#27AE60', '🟢'], ['#9B59B6', '🟣']].forEach(([val, icon]) => {{
+                const opt = document.createElement('option');
+                opt.value = val; opt.textContent = icon;
+                if (val === defaultColor1) opt.selected = true;
+                colorSel.appendChild(opt);
+            }});
+
+            // 한글 표시 라벨
+            const korLabel = document.createElement('div');
+            korLabel.style.cssText = 'font-size: 10px; color: #666; padding-left: 36px; min-height: 14px; line-height: 1.2;';
+
+            function updateKorLabel() {{
+                const parts = [];
+                const k1 = toKoreanPrice(inp1.value);
+                const k2 = toKoreanPrice(inp2.value);
+                if (k1) parts.push(k1);
+                if (k2) parts.push(k2);
+                korLabel.textContent = parts.length > 0 ? parts.join(' ~ ') : '';
+            }}
+            inp1.addEventListener('input', updateKorLabel);
+            inp2.addEventListener('input', updateKorLabel);
+
+            inputRow.appendChild(lbl);
+            inputRow.appendChild(inp1);
+            inputRow.appendChild(unit1);
+            inputRow.appendChild(tilde);
+            inputRow.appendChild(inp2);
+            inputRow.appendChild(unit2);
+            inputRow.appendChild(colorSel);
+
+            row.appendChild(inputRow);
+            row.appendChild(korLabel);
+
+            return {{ row, inp1, inp2, colorSel }};
+        }}
+
+        const saleRow = createRangeRow('매매', '#3498DB', '#3498DB', '#3498DB');
+        const leaseRow = createRangeRow('전세', '#E74C3C', '#E74C3C', '#E74C3C');
+
+        // 버튼 행
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display: flex; gap: 8px; justify-content: center; margin-top: 2px;';
+
+        const drawBtn = document.createElement('button');
+        drawBtn.textContent = '그리기';
+        drawBtn.style.cssText = 'flex: 1; padding: 6px 0; background: #27AE60; color: white; border: none; border-radius: 5px; font-size: 12px; cursor: pointer; font-weight: bold;';
+        drawBtn.onmouseover = function() {{ this.style.background = '#219A52'; }};
+        drawBtn.onmouseout = function() {{ this.style.background = '#27AE60'; }};
+
+        const clearHlineBtn = document.createElement('button');
+        clearHlineBtn.textContent = '삭제';
+        clearHlineBtn.style.cssText = 'flex: 1; padding: 6px 0; background: #E74C3C; color: white; border: none; border-radius: 5px; font-size: 12px; cursor: pointer;';
+        clearHlineBtn.onmouseover = function() {{ this.style.background = '#C0392B'; }};
+        clearHlineBtn.onmouseout = function() {{ this.style.background = '#E74C3C'; }};
+
+        btnRow.appendChild(drawBtn);
+        btnRow.appendChild(clearHlineBtn);
+
+        hlineBody.appendChild(saleRow.row);
+        hlineBody.appendChild(leaseRow.row);
+        hlineBody.appendChild(btnRow);
+
+        hlinePanel.appendChild(hlineHeader);
+        hlinePanel.appendChild(hlineBody);
+        document.body.appendChild(hlinePanel);
+
+        // --- 드래그 이동 ---
+        let isDragging = false, dragOffX = 0, dragOffY = 0;
+        hlineHeader.addEventListener('mousedown', function(e) {{
+            isDragging = true;
+            dragOffX = e.clientX - hlinePanel.getBoundingClientRect().left;
+            dragOffY = e.clientY - hlinePanel.getBoundingClientRect().top;
+            hlinePanel.style.transition = 'none';
+        }});
+        document.addEventListener('mousemove', function(e) {{
+            if (!isDragging) return;
+            hlinePanel.style.left = (e.clientX - dragOffX) + 'px';
+            hlinePanel.style.top = (e.clientY - dragOffY) + 'px';
+            hlinePanel.style.right = 'auto';
+        }});
+        document.addEventListener('mouseup', function() {{ isDragging = false; }});
+
+        // --- 최소화/복원 ---
+        minimizeBtn.onclick = function() {{
+            panelMinimized = !panelMinimized;
+            hlineBody.style.display = panelMinimized ? 'none' : 'flex';
+            minimizeBtn.textContent = panelMinimized ? '+' : '—';
+            hlinePanel.style.minWidth = panelMinimized ? '140px' : '280px';
+        }};
+
+        // --- 수평선 그리기 로직 ---
+        function addHLines(inp1Val, inp2Val, color, groupName, labelPrefix, fillColor) {{
+            const p1 = parseFloat(inp1Val);
+            const p2 = parseFloat(inp2Val);
+            const shapes = [];
+            const annotations = [];
+            const xRange = graphDiv.layout.xaxis.range || graphDiv._fullLayout.xaxis.range;
+
+            if (!isNaN(p1)) {{
+                shapes.push({{
+                    type: 'line', name: groupName,
+                    x0: xRange[0], x1: xRange[1], y0: p1, y1: p1,
+                    xref: 'x', yref: 'y',
+                    line: {{ color: color, width: 2.5, dash: 'dash' }},
+                    layer: 'above'
+                }});
+                annotations.push({{
+                    name: groupName + '_label',
+                    x: xRange[1], y: p1, xref: 'x', yref: 'y',
+                    text: `${{labelPrefix}} ${{p1.toLocaleString()}}`,
+                    showarrow: false,
+                    font: {{ size: 11, color: color, family: 'Malgun Gothic, Arial' }},
+                    bgcolor: 'rgba(255,255,255,0.85)',
+                    bordercolor: color, borderwidth: 1, borderpad: 3,
+                    xanchor: 'left'
+                }});
+            }}
+            if (!isNaN(p2)) {{
+                shapes.push({{
+                    type: 'line', name: groupName,
+                    x0: xRange[0], x1: xRange[1], y0: p2, y1: p2,
+                    xref: 'x', yref: 'y',
+                    line: {{ color: color, width: 2.5, dash: 'dash' }},
+                    layer: 'above'
+                }});
+                annotations.push({{
+                    name: groupName + '_label',
+                    x: xRange[1], y: p2, xref: 'x', yref: 'y',
+                    text: `${{labelPrefix}} ${{p2.toLocaleString()}}`,
+                    showarrow: false,
+                    font: {{ size: 11, color: color, family: 'Malgun Gothic, Arial' }},
+                    bgcolor: 'rgba(255,255,255,0.85)',
+                    bordercolor: color, borderwidth: 1, borderpad: 3,
+                    xanchor: 'left'
+                }});
+            }}
+            // 범위 영역 채우기
+            if (!isNaN(p1) && !isNaN(p2)) {{
+                shapes.push({{
+                    type: 'rect', name: groupName,
+                    x0: xRange[0], x1: xRange[1],
+                    y0: Math.min(p1, p2), y1: Math.max(p1, p2),
+                    xref: 'x', yref: 'y',
+                    fillcolor: fillColor,
+                    line: {{ width: 0 }},
+                    layer: 'below'
+                }});
+            }}
+            return {{ shapes, annotations }};
+        }}
+
+        // hex to rgba 변환 헬퍼
+        function hexToFill(hex) {{
+            const r = parseInt(hex.substr(1,2),16), g = parseInt(hex.substr(3,2),16), b = parseInt(hex.substr(5,2),16);
+            return `rgba(${{r}},${{g}},${{b}},0.08)`;
+        }}
+
+        drawBtn.onclick = function() {{
+            const s1 = saleRow.inp1.value, s2 = saleRow.inp2.value;
+            const l1 = leaseRow.inp1.value, l2 = leaseRow.inp2.value;
+
+            if ([s1, s2, l1, l2].every(v => v === '')) {{
+                alert('가격을 하나 이상 입력해주세요.');
+                return;
+            }}
+
+            // 기존 매물선만 제거
+            const curShapes = (graphDiv.layout.shapes || []).filter(s => s.name !== 'hline_sale' && s.name !== 'hline_lease');
+            const curAnns = (graphDiv.layout.annotations || []).filter(a => a.name !== 'hline_sale_label' && a.name !== 'hline_lease_label');
+
+            const saleColor = saleRow.colorSel.value;
+            const leaseColor = leaseRow.colorSel.value;
+
+            const saleLines = addHLines(s1, s2, saleColor, 'hline_sale', '매매', hexToFill(saleColor));
+            const leaseLines = addHLines(l1, l2, leaseColor, 'hline_lease', '전세', hexToFill(leaseColor));
+
+            Plotly.relayout(graphDiv, {{
+                shapes: [...curShapes, ...saleLines.shapes, ...leaseLines.shapes],
+                annotations: [...curAnns, ...saleLines.annotations, ...leaseLines.annotations]
+            }});
+        }};
+
+        // 수평선 삭제
+        clearHlineBtn.onclick = function() {{
+            const curShapes = (graphDiv.layout.shapes || []).filter(s => s.name !== 'hline_sale' && s.name !== 'hline_lease');
+            const curAnns = (graphDiv.layout.annotations || []).filter(a => a.name !== 'hline_sale_label' && a.name !== 'hline_lease_label');
+            Plotly.relayout(graphDiv, {{ shapes: curShapes, annotations: curAnns }});
+            saleRow.inp1.value = ''; saleRow.inp2.value = '';
+            leaseRow.inp1.value = ''; leaseRow.inp2.value = '';
+        }};
+
+        // Enter 키로 그리기
+        [saleRow.inp1, saleRow.inp2, leaseRow.inp1, leaseRow.inp2].forEach(inp => {{
+            inp.addEventListener('keydown', function(e) {{
+                if (e.key === 'Enter') drawBtn.click();
+            }});
+        }});
     }}
 }});
 
-// 키보드 단축키: Ctrl+Shift+D로 모든 도형 삭제
+// 키보드 단축키: Ctrl+Shift+D로 모든 도형 삭제 (매물선 포함)
 document.addEventListener('keydown', function(e) {{
     if (e.ctrlKey && e.shiftKey && e.key === 'D') {{
         e.preventDefault();
         clickSelectionState = {{ firstClick: null, isWaiting: false }};
         Plotly.relayout(graphDiv, {{
             'shapes': [],
-            'annotations': filterPriceAnnotations(graphDiv.layout.annotations)
+            'annotations': filterPriceAnnotations(graphDiv.layout.annotations).filter(ann =>
+                ann.name !== 'hline_sale_label' &&
+                ann.name !== 'hline_lease_label'
+            )
         }});
     }}
 }});

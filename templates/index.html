@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KB부동산 시세 분석기</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Apple SD Gothic Neo','Noto Sans KR',sans-serif;background:#f0f2f5;color:#2c3e50;font-size:14px}
+  header{background:linear-gradient(135deg,#1a3a5c,#2980b9);color:white;padding:14px 24px;
+         display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+  header h1{font-size:18px;font-weight:700}
+  header .badge{font-size:11px;background:rgba(255,255,255,.2);padding:3px 10px;
+                border-radius:20px;margin-left:auto}
+
+  .main{display:flex;height:calc(100vh - 52px)}
+  .sidebar{width:290px;min-width:290px;background:white;border-right:1px solid #dce1e7;
+           overflow-y:auto;display:flex;flex-direction:column}
+  .sec{padding:13px 15px;border-bottom:1px solid #eef0f3}
+  .sec h3{font-size:11px;font-weight:700;color:#95a5a6;text-transform:uppercase;
+           letter-spacing:.5px;margin-bottom:9px}
+  .content{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+  .card{background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:15px}
+  .card-title{font-size:13px;font-weight:700;color:#5d6d7e;margin-bottom:11px}
+
+  /* 업로드존 */
+  .drop{border:2px dashed #bdc3c7;border-radius:8px;padding:14px;text-align:center;
+        cursor:pointer;transition:.2s;color:#7f8c8d;font-size:13px;position:relative}
+  .drop:hover{border-color:#2980b9;color:#2980b9;background:#f8fbff}
+  .drop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .drop.ok{border-color:#27ae60;color:#27ae60;background:#f0fff4}
+  .drop.err{border-color:#e74c3c;color:#e74c3c}
+
+  /* 버튼 */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;
+       padding:8px 14px;border-radius:6px;border:none;cursor:pointer;
+       font-size:13px;font-weight:600;transition:.15s}
+  .btn-primary{background:#2980b9;color:white}.btn-primary:hover{background:#2471a3}
+  .btn-success{background:#27ae60;color:white}.btn-success:hover{background:#229954}
+  .btn-purple{background:#8e44ad;color:white}.btn-purple:hover{background:#7d3c98}
+  .btn-sm{padding:5px 10px;font-size:12px}
+  .btn-block{width:100%}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  label{font-size:12px;color:#5d6d7e;font-weight:600;display:block;margin-bottom:3px}
+  input[type=text],select{width:100%;padding:6px 8px;border:1px solid #dce1e7;border-radius:5px;
+                           font-size:13px;color:#2c3e50;outline:none;background:white}
+  input[type=text]:focus,select:focus{border-color:#2980b9}
+
+  .check-group{display:flex;flex-direction:column;gap:5px}
+  .check-item{display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer;padding:2px 0}
+  .check-item input{width:14px;height:14px;accent-color:#2980b9;cursor:pointer}
+
+  .tag-group{display:flex;flex-wrap:wrap;gap:4px}
+  .tag{padding:3px 10px;border-radius:20px;border:1.5px solid #dce1e7;font-size:12px;
+       cursor:pointer;transition:.15s;color:#5d6d7e}
+  .tag.active{border-color:#2980b9;background:#eaf4fc;color:#2980b9;font-weight:600}
+  .tag.active.org{border-color:#e67e22;background:#fef5ec;color:#e67e22}
+  .tag.org{color:#5d6d7e}
+
+  .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+  .info-item{background:#f8f9fa;border-radius:6px;padding:7px 9px}
+  .info-item .lbl{font-size:10px;color:#95a5a6;margin-bottom:1px}
+  .info-item .val{font-size:12px;font-weight:600;color:#2c3e50;word-break:break-all}
+
+  .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:7px}
+  .stat{background:#f8f9fa;border-radius:8px;padding:10px;text-align:center}
+  .stat .lbl{font-size:10px;color:#95a5a6;margin-bottom:2px}
+  .stat .val{font-size:17px;font-weight:700;color:#2c3e50}
+  .stat .sub{font-size:10px;color:#7f8c8d;margin-top:1px}
+  .stat.warn .val{color:#e67e22}
+  .stat.red  .val{color:#e74c3c}
+
+  .prog{display:none;margin-top:7px}
+  .prog-bar{height:4px;background:#eef0f3;border-radius:2px;overflow:hidden}
+  .prog-fill{height:100%;background:#2980b9;border-radius:2px;transition:width .3s;width:0}
+  .prog-msg{font-size:11px;color:#7f8c8d;margin-top:3px}
+
+  .alert{padding:7px 11px;border-radius:6px;font-size:12px;margin-top:5px;display:none}
+  .alert.info{background:#eaf4fc;color:#2980b9;border-left:3px solid #2980b9}
+  .alert.warn{background:#fef5ec;color:#e67e22;border-left:3px solid #e67e22}
+  .alert.err {background:#fdedec;color:#e74c3c;border-left:3px solid #e74c3c}
+  .alert.ok  {background:#eafaf1;color:#27ae60;border-left:3px solid #27ae60}
+
+  #chartDiv{min-height:640px;border-radius:8px;overflow:hidden}
+  .placeholder{height:400px;display:flex;flex-direction:column;align-items:center;
+               justify-content:center;color:#bdc3c7;gap:10px;font-size:14px}
+
+  /* 결과 저장 패널 */
+  .save-panel{display:none;background:#f8f9fa;border:1px solid #dce1e7;border-radius:8px;
+              padding:12px 14px;margin-top:8px}
+  .save-panel .filename{font-size:12px;color:#5d6d7e;margin-bottom:8px;word-break:break-all}
+
+  ::-webkit-scrollbar{width:4px}
+  ::-webkit-scrollbar-thumb{background:#bdc3c7;border-radius:2px}
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+    <polyline points="9 22 9 12 15 12 15 22"/>
+  </svg>
+  <h1>KB부동산 시세 분석기</h1>
+  <span class="badge" id="statusBadge">대기중</span>
+</header>
+
+<div class="main">
+<!-- ────────────── 사이드바 ────────────── -->
+<aside class="sidebar">
+
+  <!-- ① 법정동 코드 -->
+  <div class="sec">
+    <h3>① 법정동 코드 파일</h3>
+    <div class="drop" id="lawdongZone">
+      <input type="file" accept=".txt" onchange="uploadLawdong(this)">
+      <div id="lawdongTxt">law-dong.txt 업로드</div>
+      <div style="font-size:11px;margin-top:2px;color:#95a5a6" id="lawdongSub">클릭 또는 드래그</div>
+    </div>
+    <div class="alert" id="lawdongAlert"></div>
+  </div>
+
+  <!-- ② KB 엑셀 -->
+  <div class="sec">
+    <h3>② KB 시세 엑셀</h3>
+    <div style="margin-bottom:7px">
+      <label>매매가 유형</label>
+      <div class="tag-group">
+        <span class="tag" data-t="low"    data-g="sale">하위</span>
+        <span class="tag active" data-t="normal" data-g="sale">일반</span>
+        <span class="tag" data-t="high"   data-g="sale">상위</span>
+      </div>
+    </div>
+    <div style="margin-bottom:8px">
+      <label>전세가 유형</label>
+      <div class="tag-group">
+        <span class="tag org" data-t="low"    data-g="lease">하위</span>
+        <span class="tag active org" data-t="normal" data-g="lease">일반</span>
+        <span class="tag org" data-t="high"   data-g="lease">상위</span>
+      </div>
+    </div>
+    <div class="drop" id="kbZone">
+      <input type="file" accept=".xlsx,.xls" onchange="uploadKB(this)">
+      <div id="kbTxt">KB시세 엑셀 업로드</div>
+      <div style="font-size:11px;margin-top:2px;color:#95a5a6" id="kbSub">클릭 또는 드래그</div>
+    </div>
+    <div class="alert" id="kbAlert"></div>
+  </div>
+
+  <!-- 단지 정보 -->
+  <div class="sec" id="complexSec" style="display:none">
+    <h3>단지 정보</h3>
+    <div class="info-grid" id="complexGrid"></div>
+  </div>
+
+  <!-- 단지명/면적 -->
+  <div class="sec">
+    <h3>단지명 / 면적</h3>
+    <div style="margin-bottom:6px">
+      <label>단지명</label>
+      <input type="text" id="aptName" placeholder="예) 잠실엘스">
+    </div>
+    <div>
+      <label>전용면적 (㎡)</label>
+      <input type="text" id="aptArea" placeholder="예) 84">
+    </div>
+  </div>
+
+  <!-- ③ 차트 옵션 -->
+  <div class="sec">
+    <h3>③ 차트 옵션</h3>
+    <div class="check-group">
+      <label class="check-item"><input type="checkbox" id="optPIR"        checked> PIR (가처분소득)</label>
+      <label class="check-item"><input type="checkbox" id="optRealTrade"  checked> 매매 실거래가</label>
+      <label class="check-item"><input type="checkbox" id="optLeaseTrade" checked> 전세 실거래가</label>
+      <label class="check-item"><input type="checkbox" id="optSentiment"  checked> 심리지수</label>
+    </div>
+  </div>
+
+  <!-- 심리지수 -->
+  <div class="sec">
+    <h3>심리지수 파일 (선택)</h3>
+    <div class="drop" id="sentZone">
+      <input type="file" accept=".xlsx,.xls" onchange="uploadSentiment(this)">
+      <div>심리지수 엑셀 업로드</div>
+      <div style="font-size:11px;margin-top:2px;color:#95a5a6">선택사항</div>
+    </div>
+    <div id="sentRegionWrap" style="display:none;margin-top:7px">
+      <label>지역 선택</label>
+      <select id="sentRegion"></select>
+    </div>
+  </div>
+
+  <!-- 실행 버튼 -->
+  <div class="sec">
+    <button class="btn btn-success btn-block" id="analyzeBtn" onclick="doAnalyze()" disabled>
+      📊 차트 미리보기
+    </button>
+    <div style="height:6px"></div>
+    <button class="btn btn-purple btn-block" id="saveBtn" onclick="doSaveHtml()" disabled>
+      💾 HTML 파일로 저장
+    </button>
+    <div class="prog" id="prog">
+      <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
+      <div class="prog-msg" id="progMsg">처리 중...</div>
+    </div>
+    <div class="alert" id="mainAlert"></div>
+
+    <!-- 저장 완료 패널 -->
+    <div class="save-panel" id="savePanel">
+      <div style="font-size:12px;font-weight:600;color:#8e44ad;margin-bottom:5px">✅ HTML 파일 저장 완료</div>
+      <div class="filename" id="savedFilename"></div>
+      <div style="font-size:11px;color:#7f8c8d">3.-graph 폴더에 저장되었습니다</div>
+    </div>
+  </div>
+
+  <!-- API 키 -->
+  <div class="sec">
+    <h3>공공데이터 API 키</h3>
+    <input type="text" id="serviceKey" placeholder="API 키" style="font-size:11px">
+    <button class="btn btn-sm btn-primary" style="margin-top:5px" onclick="saveApiKey()">저장</button>
+  </div>
+
+</aside>
+
+<!-- ────────────── 메인 콘텐츠 ────────────── -->
+<main class="content">
+
+  <div class="card" id="statsCard" style="display:none">
+    <div class="card-title">📈 주요 지표</div>
+    <div class="stats-grid" id="statsGrid"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📉 KB시세 차트</div>
+    <div id="chartDiv">
+      <div class="placeholder">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#bdc3c7" stroke-width="1.2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        <div style="text-align:center">KB 시세 엑셀을 업로드하고<br>차트 미리보기 또는 HTML 저장을 눌러주세요</div>
+      </div>
+    </div>
+  </div>
+
+</main>
+</div>
+
+<script>
+// ── 상태 ──────────────────────────────────────────────────────────────────────
+const S = {
+  df: null, address: null, complex: null,
+  type_households: null,
+  sale_types: ['normal'], lease_types: ['normal'],
+};
+
+// ── 초기화 ────────────────────────────────────────────────────────────────────
+(async () => {
+  const r = await fetch('/api/settings').then(r => r.json());
+  if (r.lawdong_loaded) {
+    zoneOk('lawdongZone', '법정동 코드 로드됨');
+    document.getElementById('lawdongSub').textContent = '✓ 이미 로드됨';
+  }
+  if (r.service_key) document.getElementById('serviceKey').value = r.service_key;
+  loadSentRegions();
+
+  document.querySelectorAll('.tag').forEach(t => t.addEventListener('click', () => {
+    t.classList.toggle('active');
+    const g = t.dataset.g;
+    const active = [...document.querySelectorAll(`.tag[data-g="${g}"].active`)].map(x => x.dataset.t);
+    if (g === 'sale')  S.sale_types  = active.length ? active : ['normal'];
+    if (g === 'lease') S.lease_types = active.length ? active : ['normal'];
+  }));
+})();
+
+async function loadSentRegions() {
+  const r = await fetch('/api/sentiment-regions').then(r => r.json());
+  if (r.regions?.length) { fillRegions(r.regions); zoneOk('sentZone','심리지수 로드됨'); }
+}
+function fillRegions(regions) {
+  document.getElementById('sentRegion').innerHTML = regions.map(r=>`<option>${r}</option>`).join('');
+  document.getElementById('sentRegionWrap').style.display = 'block';
+}
+
+// ── 업로드 ────────────────────────────────────────────────────────────────────
+async function uploadLawdong(input) {
+  const file = input.files[0]; if (!file) return;
+  showAlert('lawdongAlert','info','업로드 중...');
+  const fd = new FormData(); fd.append('file', file);
+  const r = await fetch('/api/upload-lawdong',{method:'POST',body:fd}).then(r=>r.json());
+  if (r.ok) {
+    zoneOk('lawdongZone', file.name);
+    document.getElementById('lawdongSub').textContent = `✓ ${r.count.toLocaleString()}개`;
+    showAlert('lawdongAlert','ok',`${r.count.toLocaleString()}개 코드 로드 완료`);
+  } else {
+    zoneErr('lawdongZone');
+    showAlert('lawdongAlert','err', r.error);
+  }
+}
+
+async function uploadKB(input) {
+  const file = input.files[0]; if (!file) return;
+  document.getElementById('kbSub').textContent = '파싱 중...';
+  showAlert('kbAlert','info','엑셀 읽는 중...');
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('sale_types',  S.sale_types.join(','));
+  fd.append('lease_types', S.lease_types.join(','));
+  const r = await fetch('/api/upload-kb',{method:'POST',body:fd}).then(r=>r.json());
+  if (r.ok) {
+    S.df = r.df; S.address = r.address; S.complex = r.complex;
+    S.type_households = r.type_households;
+    S.sale_types = r.sale_types; S.lease_types = r.lease_types;
+    zoneOk('kbZone', file.name);
+    document.getElementById('kbSub').textContent = `✓ ${r.df.length}개월`;
+    showAlert('kbAlert','ok',`파싱 완료 — ${r.complex['단지명']||'?'}`);
+    showComplex(r.complex, r.address);
+
+    // 자동 채우기
+    if (r.complex['단지명']) document.getElementById('aptName').value = r.complex['단지명'];
+    const at = r.complex['공급전용면적']||'';
+    const m  = at.match(/(\d+(?:\.\d+)?)\s*(?:㎡|m2)?$/);
+    if (m) document.getElementById('aptArea').value = Math.round(parseFloat(m[1]));
+
+    document.getElementById('analyzeBtn').disabled = false;
+    document.getElementById('saveBtn').disabled    = false;
+    badge('KB 로드됨','#27ae60');
+  } else {
+    zoneErr('kbZone'); showAlert('kbAlert','err', r.error||'파싱 오류');
+  }
+}
+
+async function uploadSentiment(input) {
+  const file = input.files[0]; if (!file) return;
+  const fd = new FormData(); fd.append('file', file);
+  const r = await fetch('/api/upload-sentiment',{method:'POST',body:fd}).then(r=>r.json());
+  if (r.ok) { zoneOk('sentZone', file.name); fillRegions(r.regions); }
+  else       { zoneErr('sentZone'); showAlert('mainAlert','err', r.error); }
+}
+
+// ── 공통 payload 구성 ─────────────────────────────────────────────────────────
+function buildPayload() {
+  return {
+    df:               S.df,
+    apt_name:         document.getElementById('aptName').value.trim(),
+    area:             document.getElementById('aptArea').value.trim(),
+    address:          S.address,
+    sale_types:       S.sale_types,
+    lease_types:      S.lease_types,
+    type_households:  S.type_households,
+    show_pir:             document.getElementById('optPIR').checked,
+    show_disposable_pir:  document.getElementById('optPIR').checked,
+    show_real_trade:      document.getElementById('optRealTrade').checked,
+    show_lease_trade:     document.getElementById('optLeaseTrade').checked,
+    show_una_sentiment:   document.getElementById('optSentiment').checked,
+    sentiment_region:     document.getElementById('sentRegion').value||'',
+  };
+}
+
+// ── 미리보기 ──────────────────────────────────────────────────────────────────
+async function doAnalyze() {
+  if (!S.df) return;
+  setBtns(true); showProg(true,'실거래가 조회 중...'); badge('분석 중...','#e67e22');
+  try {
+    const r = await fetch('/api/analyze',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(buildPayload())
+    }).then(r=>r.json());
+    if (r.ok) {
+      renderChart(r.chart); renderStats(r.stats);
+      showAlert('mainAlert','ok',
+        `완료 — 매매 ${r.trades_count}건, 전세 ${r.leases_count}건` +
+        (!r.sigungu_code ? ' ⚠ 법정동 미매칭' : ''));
+      badge('완료','#27ae60');
+    } else { showAlert('mainAlert','err', r.error); badge('오류','#e74c3c'); }
+  } catch(e) { showAlert('mainAlert','err','서버 오류: '+e.message); }
+  finally { setBtns(false); showProg(false); }
+}
+
+// ── HTML 저장 ─────────────────────────────────────────────────────────────────
+async function doSaveHtml() {
+  if (!S.df) return;
+  setBtns(true); showProg(true,'HTML 파일 생성 중... (실거래 조회 포함)'); badge('저장 중...','#8e44ad');
+  document.getElementById('savePanel').style.display = 'none';
+  try {
+    const resp = await fetch('/api/save-html',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(buildPayload())
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      showAlert('mainAlert','err', err.error||'저장 오류'); badge('오류','#e74c3c'); return;
+    }
+    // 파일명 추출 후 다운로드
+    const cd   = resp.headers.get('Content-Disposition')||'';
+    const match = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i);
+    const fname = match ? decodeURIComponent(match[1]) :
+                  `${document.getElementById('aptName').value}_chart.html`;
+
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fname;
+    a.click();
+
+    document.getElementById('savedFilename').textContent = fname;
+    document.getElementById('savePanel').style.display = 'block';
+    showAlert('mainAlert','ok','HTML 파일 저장 완료!');
+    badge('저장완료','#8e44ad');
+  } catch(e) { showAlert('mainAlert','err','오류: '+e.message); }
+  finally { setBtns(false); showProg(false); }
+}
+
+// ── 차트/통계 렌더 ────────────────────────────────────────────────────────────
+function renderChart(data) {
+  const div = document.getElementById('chartDiv');
+  div.innerHTML = '';
+  Plotly.newPlot(div, data.data, data.layout, {
+    responsive:true, displaylogo:false,
+    modeBarButtonsToRemove:['select2d','lasso2d']
+  });
+}
+
+function renderStats(stats) {
+  if (!stats || !Object.keys(stats).length) return;
+  document.getElementById('statsCard').style.display = 'block';
+  const fmt = v => {
+    if (!v) return '-';
+    const 억=Math.floor(v/10000), 천=Math.round((v%10000)/1000);
+    return 억>0 ? (천>0?`${억}억${천}천`:`${억}억`) : `${Math.round(v/1000)}천`;
+  };
+  const rows = [];
+  if (stats.current   != null) rows.push(['현재 매매가', fmt(stats.current), '', '']);
+  if (stats.max       != null) rows.push(['역대 최고가', fmt(stats.max), stats.max_date||'', 'red']);
+  if (stats.drop_pct  != null) rows.push(['고점 대비', stats.drop_pct+'%', '하락', stats.drop_pct>10?'warn':'']);
+  if (stats.cagr      != null) rows.push(['연복리(CAGR)', stats.cagr+'%', '전기간', '']);
+  if (stats.pir_current!=null) rows.push(['현재 PIR', stats.pir_current, `평균 ${stats.pir_avg}`, stats.pir_current>(stats.pir_avg||10)*1.2?'warn':'']);
+  if (stats.trade_count!=null) rows.push(['매매 실거래', stats.trade_count+'건', `최근1년 ${stats.recent_trade_count||0}건`, '']);
+  if (stats.turnover  != null) rows.push(['연간 회전율', stats.turnover+'%', '', '']);
+  document.getElementById('statsGrid').innerHTML = rows.map(([lb,val,sub,cls])=>`
+    <div class="stat ${cls}">
+      <div class="lbl">${lb}</div>
+      <div class="val">${val}</div>
+      ${sub?`<div class="sub">${sub}</div>`:''}
+    </div>`).join('');
+}
+
+function showComplex(c, addr) {
+  document.getElementById('complexSec').style.display = 'block';
+  document.getElementById('complexGrid').innerHTML = [
+    ['단지명', c['단지명']], ['주소', `${addr.sido} ${addr.sigungu} ${addr.dong}`],
+    ['면적',   c['공급전용면적']], ['세대수', c['세대수']],
+    ['타입',   c['타입']], ['방/욕실', c['방욕실']],
+  ].map(([k,v])=>`<div class="info-item"><div class="lbl">${k}</div>
+    <div class="val">${v||'-'}</div></div>`).join('');
+}
+
+async function saveApiKey() {
+  const key = document.getElementById('serviceKey').value.trim(); if (!key) return;
+  await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({service_key:key})});
+  showAlert('mainAlert','ok','API 키 저장됨');
+}
+
+// ── 유틸 ──────────────────────────────────────────────────────────────────────
+function zoneOk(id, txt) {
+  const z=document.getElementById(id); z.classList.add('ok'); z.classList.remove('err');
+  z.querySelector('div').textContent = '✓ '+txt;
+}
+function zoneErr(id) {
+  const z=document.getElementById(id); z.classList.add('err'); z.classList.remove('ok');
+}
+function showAlert(id, type, msg) {
+  const el=document.getElementById(id);
+  el.className=`alert ${type}`; el.textContent=msg; el.style.display='block';
+  if(type==='ok') setTimeout(()=>el.style.display='none',4500);
+}
+function showProg(show, msg='') {
+  document.getElementById('prog').style.display = show?'block':'none';
+  if(msg) document.getElementById('progMsg').textContent = msg;
+  document.getElementById('progFill').style.width = show?'65%':'0';
+}
+function setBtns(disabled) {
+  document.getElementById('analyzeBtn').disabled = disabled;
+  document.getElementById('saveBtn').disabled    = disabled;
+}
+function badge(txt, color) {
+  const b=document.getElementById('statusBadge');
+  b.textContent=txt; b.style.background=color+'44';
+}
+</script>
+</body>
+</html>

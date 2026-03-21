@@ -4,8 +4,8 @@ KB부동산 시세 분석기 - Mac 웹 버전 v1
 브라우저: http://localhost:5050
 """
 
-from flask import Flask, render_template, request, jsonify
-import os, json, re, threading, webbrowser, warnings
+from flask import Flask, render_template, request, jsonify, Response, send_file
+import os, json, re, threading, webbrowser, warnings, queue, time, glob
 import pandas as pd
 import numpy as np
 import requests
@@ -690,6 +690,461 @@ def save_html():
 
     return send_file(save_path, as_attachment=True, download_name=filename,
                      mimetype='text/html')
+
+# ── KB 자동 다운로드 (Selenium) ───────────────────────────────────────────────
+# 진행상황을 SSE로 스트리밍하기 위한 큐
+_kb_progress_queues: dict = {}
+
+def kb_auto_download(apt_name: str, target_area: str, q: queue.Queue):
+    """Selenium으로 KB부동산 시세 엑셀 자동 다운로드"""
+    def send(msg_type, **kw):
+        q.put({'type': msg_type, **kw})
+
+    download_dir = UPLOAD_DIR
+
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.chrome.service import Service
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.common.keys import Keys
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        from webdriver_manager.chrome import ChromeDriverManager
+    except ImportError as e:
+        send('error', message=f'selenium 미설치: {e}'); return
+
+    # ── ChromeDriver 설치 (캐시 있으면 빠름) ──────────────────────────────────
+    send('progress', step=1, message='ChromeDriver 준비 중...')
+    try:
+        driver_path = ChromeDriverManager().install()
+    except Exception as e:
+        send('error', message=f'ChromeDriver 설치 실패: {e}'); return
+
+    abs_dl = os.path.abspath(download_dir)
+    prefs = {
+        'download.default_directory':   abs_dl,
+        'download.prompt_for_download': False,
+        'download.directory_upgrade':   True,
+        'safebrowsing.enabled':         False,
+        'profile.default_content_setting_values.automatic_downloads': 1,
+    }
+
+    # 비headless 모드 — KB부동산은 headless 감지하여 차단함. 로컬 Mac에서는 창 표시가 안정적
+    opts = Options()
+    # headless 미사용: KB부동산이 headless 차단
+    opts.add_argument('--window-size=1400,900')
+    opts.add_argument('--disable-gpu')
+    opts.add_argument('--no-sandbox')
+    opts.add_argument('--disable-dev-shm-usage')
+    opts.add_argument('--disable-blink-features=AutomationControlled')
+    opts.add_argument('--disable-extensions')
+    opts.add_argument('--disable-popup-blocking')
+    opts.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                      'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36')
+    opts.add_experimental_option('prefs', prefs)
+    opts.add_experimental_option('excludeSwitches', ['enable-automation'])
+    opts.add_experimental_option('useAutomationExtension', False)
+    opts.page_load_strategy = 'normal'
+
+    send('progress', step=2, message='Chrome 실행 중...')
+    try:
+        service = Service(driver_path)
+        driver  = webdriver.Chrome(service=service, options=opts)
+        driver.implicitly_wait(3)
+    except Exception as e:
+        send('error', message=f'Chrome 실행 실패: {e}'); return
+
+    # 자동화 감지 방지
+    try:
+        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"})
+        driver.execute_cdp_cmd('Page.setDownloadBehavior',
+                               {'behavior':'allow','downloadPath': abs_dl})
+    except: pass
+
+    before_files = set(os.listdir(download_dir))
+
+    try:
+        # ── KB부동산 접속 ──────────────────────────────────────────────────────
+        send('progress', step=3, message='KB부동산 접속 중... (Chrome 창이 잠시 열립니다)')
+        driver.set_page_load_timeout(60)
+        driver.get('https://kbland.kr/map')
+        time.sleep(5)   # JS 렌더링 대기 (비headless는 더 빠름)
+
+        # 디버그: 페이지 제목 확인
+        print(f"[KB] 페이지 제목: {driver.title}")
+
+        # 팝업 닫기
+        for sel in ['button.close','button.popup-close','[aria-label="닫기"]',
+                    '.modal-close','button[class*="close"]']:
+            try:
+                for btn in driver.find_elements(By.CSS_SELECTOR, sel):
+                    if btn.is_displayed():
+                        driver.execute_script('arguments[0].click();', btn)
+                        time.sleep(0.5)
+            except: pass
+
+        # ── 검색창 열기 ────────────────────────────────────────────────────────
+        send('progress', step=4, message=f'"{apt_name}" 검색 중...')
+        search_opened = False
+        search_selectors = [
+            'div.mapsearch-wrap button',
+            '#app > div > div.mapsearch-wrap > div > button',
+            'button.btn-land-search',
+            'button[class*="search"]',
+            '//button[contains(@class,"search")]',
+        ]
+        for sel in search_selectors:
+            try:
+                if sel.startswith('//'):
+                    btn = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, sel)))
+                else:
+                    btn = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
+                driver.execute_script('arguments[0].click();', btn)
+                print(f"[KB] 검색 버튼 클릭 성공: {sel}")
+                time.sleep(2); search_opened = True; break
+            except: pass
+
+        if not search_opened:
+            # 페이지 소스 저장 (디버그용)
+            dbg = os.path.join(BASE_DIR, 'kb_debug.html')
+            with open(dbg, 'w', encoding='utf-8') as f: f.write(driver.page_source)
+            send('error', message='검색 버튼을 찾을 수 없습니다. kb_debug.html 확인')
+            driver.quit(); return
+
+        # 입력창 대기
+        inp_selectors = [
+            "input[placeholder*='단지']",
+            "input[placeholder*='주소']",
+            "input.form-control",
+            "input[type='text']",
+        ]
+        inp = None
+        for sel in inp_selectors:
+            try:
+                inp = WebDriverWait(driver, 8).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
+                break
+            except: pass
+
+        if not inp:
+            send('error', message='검색 입력창을 찾을 수 없습니다.'); driver.quit(); return
+
+        inp.clear(); inp.send_keys(apt_name); time.sleep(1.5)
+        inp.send_keys(Keys.RETURN); time.sleep(4)
+
+        # ── 검색 결과 처리 ─────────────────────────────────────────────────────
+        # widthTypeSelect = 단지 페이지 로드됨
+        direct = False
+        try:
+            WebDriverWait(driver, 6).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'div.widthTypeSelect')))
+            direct = True
+        except: pass
+
+        if not direct:
+            items_el = driver.find_elements(By.CSS_SELECTOR, 'div.item-search-poi')
+            if not items_el:
+                # 검색 결과 없음 - 디버그 저장
+                dbg = os.path.join(BASE_DIR, 'kb_debug.html')
+                with open(dbg, 'w', encoding='utf-8') as f: f.write(driver.page_source)
+                send('error', message=f'"{apt_name}" 검색 결과 없음. kb_debug.html 확인')
+                driver.quit(); return
+
+            if len(items_el) == 1:
+                try:
+                    span = items_el[0].find_element(By.CSS_SELECTOR, 'span.search-poi')
+                    driver.execute_script('arguments[0].click();', span)
+                except:
+                    driver.execute_script('arguments[0].click();', items_el[0])
+                time.sleep(4)
+            else:
+                choices = []
+                for el in items_el:
+                    try:
+                        name = el.find_element(By.CSS_SELECTOR, 'span.text').text.strip()
+                        loc  = el.find_element(By.CSS_SELECTOR, 'span.date').text.strip()
+                        choices.append({'name': name, 'loc': loc})
+                    except: choices.append({'name':'?', 'loc':'?'})
+
+                send('select', choices=choices, message='단지를 선택해주세요.')
+                sel_idx = None
+                for _ in range(180):   # 90초 대기
+                    if not q.empty():
+                        msg = q.get()
+                        if msg.get('type') == 'select_result':
+                            sel_idx = msg['index']; break
+                    time.sleep(0.5)
+                if sel_idx is None:
+                    send('error', message='단지 선택 시간 초과'); driver.quit(); return
+
+                items_el = driver.find_elements(By.CSS_SELECTOR, 'div.item-search-poi')
+                try:
+                    span = items_el[sel_idx].find_element(By.CSS_SELECTOR, 'span.search-poi')
+                    driver.execute_script('arguments[0].click();', span)
+                except:
+                    driver.execute_script('arguments[0].click();', items_el[sel_idx])
+                time.sleep(4)
+
+        # ── 면적 선택 ──────────────────────────────────────────────────────────
+        send('progress', step=5, message='면적 선택 중...')
+        target_int = str(int(float(target_area))) if target_area else ''
+
+        # widthTypeSelect 드롭다운 열기
+        try:
+            dd = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'div.widthTypeSelect')))
+            driver.execute_script('arguments[0].scrollIntoView({block:"center"});', dd)
+            time.sleep(1)
+            driver.execute_script('arguments[0].click();', dd)
+            time.sleep(2.5)
+        except Exception as e:
+            send('error', message=f'면적 드롭다운 열기 실패: {e}'); driver.quit(); return
+
+        # 면적 행 파싱 (여러 셀렉터 시도)
+        def get_area_rows():
+            for sel in ['div.tbody-tr', 'tr.tbody-tr', 'div[class*="tbody"]']:
+                rows = driver.find_elements(By.CSS_SELECTOR, sel)
+                if rows: return rows
+            return []
+
+        def parse_area_from_row(row):
+            for sel in ['span.tdbox span.tbarea-point em', 'em', 'td', 'span']:
+                try:
+                    for el in row.find_elements(By.CSS_SELECTOR, sel):
+                        m = re.search(r'전용\s*([\d.]+)', el.text)
+                        if m: return m.group(1)
+                except: pass
+            return None
+
+        rows = get_area_rows()
+        clicked = False
+        area_choices = []
+
+        for row in rows:
+            a = parse_area_from_row(row)
+            if a:
+                area_choices.append(a)
+                if target_int and a.split('.')[0] == target_int:
+                    driver.execute_script('arguments[0].click();', row)
+                    time.sleep(2); clicked = True; break
+
+        if not clicked:
+            if area_choices:
+                send('select_area', choices=area_choices, message='면적을 선택해주세요.')
+                sel_area = None
+                for _ in range(180):
+                    if not q.empty():
+                        msg = q.get()
+                        if msg.get('type') == 'select_area_result':
+                            sel_area = msg['area']; break
+                    time.sleep(0.5)
+                if not sel_area:
+                    send('error', message='면적 선택 시간 초과'); driver.quit(); return
+                target_int = sel_area.split('.')[0]
+                rows = get_area_rows()
+                for row in rows:
+                    a = parse_area_from_row(row)
+                    if a and a.split('.')[0] == target_int:
+                        driver.execute_script('arguments[0].click();', row)
+                        time.sleep(2); clicked = True; break
+            else:
+                # 면적 정보를 아예 못 찾은 경우 - 첫 번째 행 선택
+                rows = get_area_rows()
+                if rows:
+                    driver.execute_script('arguments[0].click();', rows[0])
+                    time.sleep(2); clicked = True
+
+        if not clicked:
+            send('error', message='면적 선택 실패'); driver.quit(); return
+
+        # ── STEP 6: KB시세 버튼 클릭 (팝업 열기) ────────────────────────────
+        send('progress', step=6, message='KB시세 버튼 클릭 중...')
+        time.sleep(3)
+
+        def find_btn_by_text(keywords, timeout=8):
+            """키워드 중 하나라도 포함된 버튼 반환"""
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                btns = driver.find_elements(By.TAG_NAME, 'button')
+                for b in btns:
+                    try:
+                        t = b.text.strip()
+                        if t and any(kw in t for kw in keywords):
+                            return b, t
+                    except: pass
+                time.sleep(0.5)
+            return None, None
+
+        def find_btn_by_css(selectors, timeout=5):
+            for sel in selectors:
+                try:
+                    b = WebDriverWait(driver, timeout).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
+                    return b
+                except: pass
+            return None
+
+        # 현재 버튼 목록 디버그 출력
+        print("[KB] 현재 버튼 목록:")
+        for b in driver.find_elements(By.TAG_NAME, 'button'):
+            try:
+                t = b.text.strip()
+                if t: print(f"  '{t}'")
+            except: pass
+
+        # KB시세 버튼 (첫 번째 클릭 — 팝업/드롭다운 열기)
+        kb_btn, kb_btn_text = find_btn_by_text(['KB시세', 'KB 시세', '시세표'])
+        if not kb_btn:
+            kb_btn = find_btn_by_css([
+                'button.btn-land-sqlinebx',
+                'button[class*="sqlinebx"]',
+                'div.f-row2-gap8 > button:nth-child(2)',
+                '#시세 button:last-child',
+            ])
+            kb_btn_text = kb_btn.text.strip() if kb_btn else '?'
+
+        if not kb_btn:
+            dbg = os.path.join(BASE_DIR, 'kb_debug.html')
+            with open(dbg, 'w', encoding='utf-8') as f: f.write(driver.page_source)
+            send('error', message='KB시세 버튼 없음. kb_debug.html 확인')
+            driver.quit(); return
+
+        print(f"[KB] KB시세 버튼 클릭: '{kb_btn_text}'")
+        driver.execute_script('arguments[0].scrollIntoView({block:"center"});', kb_btn)
+        time.sleep(0.5)
+        driver.execute_script('arguments[0].click();', kb_btn)
+        time.sleep(2.5)   # 팝업/드롭다운 열릴 때까지 대기
+
+        # ── STEP 7: 과거시세 다운로드 버튼 클릭 (실제 다운로드) ──────────────
+        send('progress', step=7, message='과거시세 다운로드 클릭 중...')
+
+        print("[KB] KB시세 클릭 후 버튼 목록:")
+        for b in driver.find_elements(By.TAG_NAME, 'button'):
+            try:
+                t = b.text.strip()
+                if t: print(f"  '{t}'")
+            except: pass
+
+        dl_btn, dl_btn_text = find_btn_by_text(['과거시세', '과거 시세', '다운로드'], timeout=8)
+        if not dl_btn:
+            dl_btn = find_btn_by_css([
+                'button[class*="history"]',
+                'div.layer button',
+                'div.popup button',
+                'div[class*="modal"] button',
+            ])
+            dl_btn_text = dl_btn.text.strip() if dl_btn else '?'
+
+        if not dl_btn:
+            dbg = os.path.join(BASE_DIR, 'kb_debug.html')
+            with open(dbg, 'w', encoding='utf-8') as f: f.write(driver.page_source)
+            send('error', message='과거시세 다운로드 버튼 없음. kb_debug.html 확인')
+            driver.quit(); return
+
+        print(f"[KB] 과거시세 버튼 클릭: '{dl_btn_text}'")
+        driver.execute_script('arguments[0].scrollIntoView({block:"center"});', dl_btn)
+        time.sleep(0.5)
+        driver.execute_script('arguments[0].click();', dl_btn)
+        send('progress', step=8, message='파일 다운로드 중... (최대 60초)')
+        time.sleep(3)
+
+        # ── 다운로드 완료 대기 ─────────────────────────────────────────────────
+        saved_path = None
+        for _ in range(60):   # 최대 60초 대기
+            time.sleep(1)
+            cur = set(os.listdir(download_dir))
+            new_files = cur - before_files
+            # .crdownload 제외, .xlsx 또는 임시파일 없는 것
+            completed = [f for f in new_files
+                         if not f.endswith('.crdownload') and not f.endswith('.tmp')
+                         and f.endswith('.xlsx')]
+            if completed:
+                saved_path = os.path.join(download_dir, completed[0])
+                print(f"[KB] 다운로드 완료: {completed[0]}")
+                break
+
+        driver.quit()
+
+        if not saved_path:
+            send('error', message='파일 다운로드 실패 (60초 초과)'); return
+
+        # kb_latest.xlsx로 이동
+        import shutil
+        dest = os.path.join(download_dir, 'kb_latest.xlsx')
+        shutil.copy2(saved_path, dest)
+
+        send('progress', step=9, message='엑셀 파싱 중...')
+        parsed = parse_kb_excel(dest)
+        df = parsed['df']
+        df_json = []
+        for _, row in df.iterrows():
+            d = {'date': str(row['date'])[:10]}
+            for c in df.columns:
+                if c != 'date': d[c] = float(row[c]) if pd.notna(row[c]) else 0
+            df_json.append(d)
+
+        send('result', complex=parsed['complex'], address=parsed['address'],
+             type_households=parsed['type_households'], df=df_json,
+             sale_types=parsed['sale_types'], lease_types=parsed['lease_types'])
+
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        try: driver.quit()
+        except: pass
+        send('error', message=str(e))
+
+
+@app.route('/api/kb-search-stream')
+def kb_search_stream():
+    """SSE 엔드포인트 — KB 자동 다운로드 진행상황 스트리밍"""
+    apt_name    = request.args.get('apt_name','').strip()
+    target_area = request.args.get('area','').strip()
+    session_id  = request.args.get('sid','')
+
+    if not apt_name:
+        return jsonify({'error':'단지명 필요'}), 400
+
+    q = queue.Queue()
+    _kb_progress_queues[session_id] = q
+
+    # 별도 스레드에서 Selenium 실행
+    t = threading.Thread(target=kb_auto_download, args=(apt_name, target_area, q), daemon=True)
+    t.start()
+
+    def event_stream():
+        while True:
+            try:
+                msg = q.get(timeout=180)   # 3분 대기 (비headless 모드에서 더 여유)
+                yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
+                if msg['type'] in ('result', 'error'):
+                    break
+                if msg['type'] in ('select', 'select_area'):
+                    continue
+            except queue.Empty:
+                yield "data: {\"type\":\"timeout\"}\n\n"
+                break
+
+    return Response(event_stream(), mimetype='text/event-stream',
+                    headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
+
+
+@app.route('/api/kb-select', methods=['POST'])
+def kb_select():
+    """사용자가 다중 결과에서 선택한 항목을 Selenium 스레드로 전달"""
+    body = request.json
+    sid  = body.get('sid','')
+    q    = _kb_progress_queues.get(sid)
+    if not q:
+        return jsonify({'error':'세션 없음'}), 404
+    msg_type = body.get('type', 'select_result')
+    q.put({'type': msg_type, 'index': body.get('index', 0),
+           'area': body.get('area','')})
+    return jsonify({'ok': True})
+
 
 # ── 실행 ──────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':

@@ -124,7 +124,7 @@
 
   <!-- ② KB 엑셀 -->
   <div class="sec">
-    <h3>② KB 시세 엑셀</h3>
+    <h3>② KB 시세 데이터</h3>
     <div style="margin-bottom:7px">
       <label>매매가 유형</label>
       <div class="tag-group">
@@ -133,7 +133,7 @@
         <span class="tag" data-t="high"   data-g="sale">상위</span>
       </div>
     </div>
-    <div style="margin-bottom:8px">
+    <div style="margin-bottom:9px">
       <label>전세가 유형</label>
       <div class="tag-group">
         <span class="tag org" data-t="low"    data-g="lease">하위</span>
@@ -141,6 +141,25 @@
         <span class="tag org" data-t="high"   data-g="lease">상위</span>
       </div>
     </div>
+
+    <!-- 자동 검색 -->
+    <div style="background:#f0f7ff;border:1px solid #bdd6f0;border-radius:8px;padding:10px;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;color:#2980b9;margin-bottom:7px">🔍 단지명으로 자동 다운로드</div>
+      <div style="display:flex;gap:5px;margin-bottom:5px">
+        <input type="text" id="searchAptName" placeholder="단지명 (예: 잠실엘스)" style="flex:1">
+      </div>
+      <div style="display:flex;gap:5px;margin-bottom:7px">
+        <input type="text" id="searchArea" placeholder="전용면적 (예: 84)" style="width:100px">
+        <button class="btn btn-primary btn-sm" style="flex:1" onclick="startKBSearch()">검색</button>
+      </div>
+      <div class="prog" id="kbSearchProg" style="margin-top:0">
+        <div class="prog-bar"><div class="prog-fill" id="kbSearchProgFill"></div></div>
+        <div class="prog-msg" id="kbSearchProgMsg">대기중</div>
+      </div>
+    </div>
+
+    <!-- 수동 업로드 -->
+    <div style="font-size:11px;color:#95a5a6;text-align:center;margin-bottom:5px">또는 직접 업로드</div>
     <div class="drop" id="kbZone">
       <input type="file" accept=".xlsx,.xls" onchange="uploadKB(this)">
       <div id="kbTxt">KB시세 엑셀 업로드</div>
@@ -282,6 +301,138 @@ async function loadSentRegions() {
 function fillRegions(regions) {
   document.getElementById('sentRegion').innerHTML = regions.map(r=>`<option>${r}</option>`).join('');
   document.getElementById('sentRegionWrap').style.display = 'block';
+}
+
+// ── KB 자동 다운로드 (SSE) ────────────────────────────────────────────────────
+let _sid = Math.random().toString(36).slice(2);
+let _kbEvtSrc = null;
+
+function startKBSearch() {
+  const aptName = document.getElementById('searchAptName').value.trim();
+  const area    = document.getElementById('searchArea').value.trim();
+  if (!aptName) { showAlert('kbAlert','err','단지명을 입력해주세요'); return; }
+
+  if (_kbEvtSrc) { _kbEvtSrc.close(); _kbEvtSrc = null; }
+
+  kbSearchProg(true, '연결 중...');
+  document.querySelector('#kbSearchProg').style.display = 'block';
+  showAlert('kbAlert','info','KB부동산 자동 검색 시작...');
+
+  _sid = Math.random().toString(36).slice(2);
+  const url = `/api/kb-search-stream?apt_name=${encodeURIComponent(aptName)}&area=${encodeURIComponent(area)}&sid=${_sid}`;
+  _kbEvtSrc = new EventSource(url);
+
+  _kbEvtSrc.onmessage = async (e) => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === 'progress') {
+      kbSearchProg(true, msg.message);
+    }
+    else if (msg.type === 'select') {
+      // 다중 단지 선택
+      _kbEvtSrc.close();
+      const idx = await showSelectDialog('단지 선택', msg.choices.map(c=>`${c.name} (${c.loc})`));
+      if (idx === null) { kbSearchProg(false); return; }
+      await fetch('/api/kb-select',{method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({sid:_sid, type:'select_result', index:idx})});
+      // 스트림 재연결
+      _kbEvtSrc = new EventSource(url);
+      _kbEvtSrc.onmessage = arguments.callee; // 재귀 연결
+    }
+    else if (msg.type === 'select_area') {
+      // 면적 선택
+      _kbEvtSrc.close();
+      const area = await showSelectDialog('면적 선택', msg.choices.map(a=>`${a}㎡`));
+      if (area === null) { kbSearchProg(false); return; }
+      await fetch('/api/kb-select',{method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({sid:_sid, type:'select_area_result', area: msg.choices[area]})});
+      _kbEvtSrc = new EventSource(url);
+      _kbEvtSrc.onmessage = arguments.callee;
+    }
+    else if (msg.type === 'result') {
+      _kbEvtSrc.close(); _kbEvtSrc = null;
+      kbSearchProg(false);
+      // 업로드와 동일하게 상태 업데이트
+      S.df = msg.df; S.address = msg.address; S.complex = msg.complex;
+      S.type_households = msg.type_households;
+      S.sale_types = msg.sale_types; S.lease_types = msg.lease_types;
+      zoneOk('kbZone', `자동 다운로드 완료 — ${msg.complex['단지명']||'?'}`);
+      document.getElementById('kbSub').textContent = `✓ ${msg.df.length}개월 데이터`;
+      showAlert('kbAlert','ok',`KB 시세 자동 다운로드 완료!`);
+      showComplex(msg.complex, msg.address);
+      if (msg.complex['단지명']) document.getElementById('aptName').value = msg.complex['단지명'];
+      const at = msg.complex['공급전용면적']||'';
+      const m  = at.match(/(\d+(?:\.\d+)?)\s*(?:㎡|m2)?$/);
+      if (m) document.getElementById('aptArea').value = Math.round(parseFloat(m[1]));
+      document.getElementById('analyzeBtn').disabled = false;
+      document.getElementById('saveBtn').disabled    = false;
+      badge('KB 로드됨','#27ae60');
+    }
+    else if (msg.type === 'error') {
+      _kbEvtSrc.close(); _kbEvtSrc = null;
+      kbSearchProg(false);
+      showAlert('kbAlert','err', `❌ ${msg.message}`);
+    }
+    else if (msg.type === 'timeout') {
+      _kbEvtSrc.close(); _kbEvtSrc = null;
+      kbSearchProg(false);
+      showAlert('kbAlert','err','시간 초과');
+    }
+  };
+
+  _kbEvtSrc.onerror = () => {
+    _kbEvtSrc.close(); _kbEvtSrc = null;
+    kbSearchProg(false);
+    showAlert('kbAlert','err','연결 오류 — 서버 상태 확인');
+  };
+}
+
+function kbSearchProg(show, msg='') {
+  const wrap = document.getElementById('kbSearchProg');
+  wrap.style.display = show ? 'block' : 'none';
+  if (msg) document.getElementById('kbSearchProgMsg').textContent = msg;
+  document.getElementById('kbSearchProgFill').style.width = show ? '70%' : '0';
+}
+
+// ── 선택 다이얼로그 (Promise 기반) ───────────────────────────────────────────
+function showSelectDialog(title, items) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+
+    const box = document.createElement('div');
+    box.style.cssText = 'background:white;border-radius:12px;padding:20px;width:380px;max-height:60vh;display:flex;flex-direction:column;gap:10px';
+
+    box.innerHTML = `
+      <div style="font-size:15px;font-weight:700;color:#2c3e50">${title}</div>
+      <div style="overflow-y:auto;flex:1;border:1px solid #eee;border-radius:6px">
+        ${items.map((item,i)=>`
+          <div class="sel-item" data-i="${i}"
+               style="padding:10px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f5f5f5;
+                      transition:.15s" onmouseover="this.style.background='#eaf4fc'"
+               onmouseout="this.style.background='white'">
+            ${item}
+          </div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="selCancelBtn" style="flex:1;padding:8px;border:1px solid #dce1e7;border-radius:6px;
+                background:white;cursor:pointer;font-size:13px">취소</button>
+      </div>`;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    box.querySelectorAll('.sel-item').forEach(el => {
+      el.addEventListener('click', () => {
+        document.body.removeChild(overlay);
+        resolve(parseInt(el.dataset.i));
+      });
+    });
+    document.getElementById('selCancelBtn').addEventListener('click', () => {
+      document.body.removeChild(overlay);
+      resolve(null);
+    });
+  });
 }
 
 // ── 업로드 ────────────────────────────────────────────────────────────────────

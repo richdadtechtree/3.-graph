@@ -1,4 +1,15 @@
 {
   "lawdong_path": "/Users/leehyungjun/python work/3.-graph/uploads/law-dong.txt",
-  "service_key": "Vs5lXsSo6iEI8no3pP%2FT0udWF9s7Cc8oP1SIWnEI5F4h6dKq92fLvnKmxkoWGJxSeW2%2FSOLQECGxOJzWcjJEXQ%3D%3D"
+  "download_path": "/Users/leehyungjun/Downloads/KB부동산",
+  "history_path": "/Users/leehyungjun/Downloads/KB부동산/history",
+  "service_key": "Vs5lXsSo6iEI8no3pP%2FT0udWF9s7Cc8oP1SIWnEI5F4h6dKq92fLvnKmxkoWGJxSeW2%2FSOLQECGxOJzWcjJEXQ%3D%3D",
+  "sentiment_excel_path": "",
+  "regional_income_excel_path": "",
+  "show_una_sentiment": true,
+  "show_pir": true,
+  "show_disposable_pir": true,
+  "show_regional_pir": false,
+  "show_kb_price": true,
+  "show_naver_deal": false,
+  "show_real_trade": true
 }

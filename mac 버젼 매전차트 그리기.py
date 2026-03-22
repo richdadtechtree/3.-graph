@@ -8856,20 +8856,38 @@ class KBLandApp:
                         customdata=[[t['floor']] for t in low_floor_trades]
                     ))
 
-            # ========== 5. 전세 실거래가 점도표 ==========
+            # ========== 5. 전세 실거래가 점도표 (5층↑/4층↓ 구분) ==========
             if leases:
-                plotly_fig.add_trace(go.Scatter(
-                    x=[l['date'] for l in leases],
-                    y=[l['price'] for l in leases],
-                    mode='markers',
-                    name='전세실거래',
-                    marker=dict(color='#FFB366', size=5, opacity=0.75,
-                               symbol='diamond', line=dict(color='white', width=0.5)),
-                    hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
-                                  '<b>전세실거래</b>: %{y:,.0f}만원<br>' +
-                                  '<b>층</b>: %{customdata[0]}층<extra></extra>',
-                    customdata=[[l.get('floor', '-')] for l in leases]
-                ))
+                lease_high = [l for l in leases if l.get('floor', 0) > 4]
+                lease_low  = [l for l in leases if l.get('floor', 0) <= 4]
+
+                if lease_high:
+                    plotly_fig.add_trace(go.Scatter(
+                        x=[l['date'] for l in lease_high],
+                        y=[l['price'] for l in lease_high],
+                        mode='markers',
+                        name='전세실거래(5층↑)',
+                        marker=dict(color='#FF8C00', size=5, opacity=0.80,
+                                   symbol='diamond', line=dict(color='white', width=0.5)),
+                        hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
+                                      '<b>전세실거래(5층↑)</b>: %{y:,.0f}만원<br>' +
+                                      '<b>층</b>: %{customdata[0]}층<extra></extra>',
+                        customdata=[[l.get('floor', '-')] for l in lease_high]
+                    ))
+
+                if lease_low:
+                    plotly_fig.add_trace(go.Scatter(
+                        x=[l['date'] for l in lease_low],
+                        y=[l['price'] for l in lease_low],
+                        mode='markers',
+                        name='전세실거래(4층↓)',
+                        marker=dict(color='#FFCC80', size=5, opacity=0.60,
+                                   symbol='diamond', line=dict(color='white', width=0.5)),
+                        hovertemplate='<b>날짜</b>: %{x|%Y-%m}<br>' +
+                                      '<b>전세실거래(4층↓)</b>: %{y:,.0f}만원<br>' +
+                                      '<b>층</b>: %{customdata[0]}층<extra></extra>',
+                        customdata=[[l.get('floor', '-')] for l in lease_low]
+                    ))
 
             # ========== 6. KB 매물가 (수평선) ==========
             if kb_price:
@@ -9050,6 +9068,37 @@ class KBLandApp:
                                       '<b>네이버전세</b>: %{y:,.0f}만원<extra></extra>'
                     ))
 
+            # ========== 월별 거래량 막대그래프 ==========
+            vol_max_for_layout = 0  # 레이아웃 y3 범위에서 사용
+            if hasattr(self, 'show_trade_volume') and self.show_trade_volume.get() and trades:
+                from collections import defaultdict
+                monthly_volume = defaultdict(int)
+                for t in trades:
+                    ym = t['date'].strftime('%Y-%m')
+                    monthly_volume[ym] += 1
+
+                if monthly_volume:
+                    sorted_months = sorted(monthly_volume.keys())
+                    vol_dates = [pd.Timestamp(m + '-01') for m in sorted_months]
+                    vol_counts = [monthly_volume[m] for m in sorted_months]
+
+                    max_vol = max(vol_counts)
+                    vol_max_for_layout = max_vol
+
+                    plotly_fig.add_trace(go.Bar(
+                        x=vol_dates,
+                        y=vol_counts,
+                        name='월별 거래량',
+                        marker=dict(
+                            color='rgba(100, 181, 246, 0.22)',
+                            line=dict(color='rgba(30, 136, 229, 0.35)', width=0.8)
+                        ),
+                        customdata=vol_counts,
+                        hovertemplate='<b>%{x|%Y-%m}</b><br>거래량: %{customdata}건<extra></extra>',
+                        yaxis='y3',
+                        showlegend=True
+                    ))
+
             # ========== 최고가 레이블 추가 ==========
             # 매매가 최고가
             max_sale_idx = df['매매가'].idxmax()
@@ -9080,18 +9129,18 @@ class KBLandApp:
             plotly_fig.add_annotation(
                 x=max_sale_date,
                 y=max_sale_value,
-                text=f"최고 {max_sale_value:,.0f}만원<br>{max_sale_date.strftime('%Y-%m')}",
+                text=f"KB시세 매매 최고<br>{max_sale_value:,.0f}만원<br>{max_sale_date.strftime('%Y-%m')}",
                 showarrow=True,
                 arrowhead=2,
                 arrowsize=1,
                 arrowwidth=2,
-                arrowcolor="#FF6B6B",
+                arrowcolor="#0066CC",
                 ax=kb_ax,
                 ay=kb_ay,
-                bgcolor="white",
-                bordercolor="#FF6B6B",
+                bgcolor="rgba(227,242,253,0.9)",
+                bordercolor="#0066CC",
                 borderwidth=2,
-                font=dict(size=11, color="#FF6B6B")
+                font=dict(size=11, color="#0066CC")
             )
 
             # 전세가 최고가
@@ -9102,18 +9151,18 @@ class KBLandApp:
             plotly_fig.add_annotation(
                 x=max_jeonse_date,
                 y=max_jeonse_value,
-                text=f"최고 {max_jeonse_value:,.0f}만원<br>{max_jeonse_date.strftime('%Y-%m')}",
+                text=f"KB시세 전세 최고<br>{max_jeonse_value:,.0f}만원<br>{max_jeonse_date.strftime('%Y-%m')}",
                 showarrow=True,
                 arrowhead=2,
                 arrowsize=1,
                 arrowwidth=2,
-                arrowcolor="#4169E1",
+                arrowcolor="#FF6B00",
                 ax=30,
                 ay=30,
-                bgcolor="white",
-                bordercolor="#4169E1",
+                bgcolor="rgba(255,243,224,0.9)",
+                bordercolor="#FF6B00",
                 borderwidth=2,
-                font=dict(size=11, color="#4169E1")
+                font=dict(size=11, color="#FF6B00")
             )
 
             # 실거래 최고가
@@ -9126,84 +9175,196 @@ class KBLandApp:
                 plotly_fig.add_annotation(
                     x=max_trade_date,
                     y=max_trade_price,
-                    text=f"실거래 최고<br>{max_trade_date.strftime('%Y-%m')}<br>{max_trade_price:,.0f}만원<br>({max_trade_floor}층)",
+                    text=(
+                        f"👑 실거래 최고가<br>"
+                        f"<b style='font-size:15px;'>{max_trade_price:,.0f}만원</b><br>"
+                        f"{max_trade_date.strftime('%Y년 %m월')}  {max_trade_floor}층"
+                    ),
                     showarrow=True,
-                    arrowhead=2,
-                    arrowsize=1,
-                    arrowwidth=2,
-                    arrowcolor="#3498DB",
+                    arrowhead=3,
+                    arrowsize=1.2,
+                    arrowwidth=2.5,
+                    arrowcolor="#1565C0",
                     ax=trade_ax,
                     ay=trade_ay,
-                    bgcolor="white",
-                    bordercolor="#3498DB",
-                    borderwidth=2,
-                    font=dict(size=11, color="#3498DB")
+                    bgcolor="rgba(227, 242, 253, 0.97)",
+                    bordercolor="#1565C0",
+                    borderwidth=2.5,
+                    borderpad=8,
+                    font=dict(size=13, color="#0D3C6E", family="AppleGothic, Arial")
                 )
 
-            # 실거래 최근 최저가 (2021~2026년)
+            # 전세 실거래 최고가
+            if leases:
+                max_lease_trade = max(leases, key=lambda l: l['price'])
+                max_lease_price = max_lease_trade['price']
+                max_lease_date = max_lease_trade['date']
+                max_lease_floor = max_lease_trade.get('floor', '-')
+
+                # 매매 최고가와 날짜 비교해서 annotation 방향 결정
+                if trades and max_lease_date > max_trade_date:
+                    lease_ax = -50
+                    lease_ay = -40
+                else:
+                    lease_ax = 50
+                    lease_ay = -40
+
+                plotly_fig.add_annotation(
+                    x=max_lease_date,
+                    y=max_lease_price,
+                    text=(
+                        f"🏅 전세 실거래 최고가<br>"
+                        f"<b style='font-size:15px;'>{max_lease_price:,.0f}만원</b><br>"
+                        f"{max_lease_date.strftime('%Y년 %m월')}  {max_lease_floor}층"
+                    ),
+                    showarrow=True,
+                    arrowhead=3,
+                    arrowsize=1.2,
+                    arrowwidth=2.5,
+                    arrowcolor="#E65100",
+                    ax=lease_ax,
+                    ay=lease_ay,
+                    bgcolor="rgba(255, 243, 224, 0.97)",
+                    bordercolor="#E65100",
+                    borderwidth=2.5,
+                    borderpad=8,
+                    font=dict(size=13, color="#7B2D00", family="AppleGothic, Arial")
+                )
+
+            # 최근 N년 실거래 최저·최고가 (매매 + 전세)
+            recent_trade_years = plot_data.get('recent_trade_years', 5)
+            from datetime import timedelta
+            cutoff_date = datetime.now() - timedelta(days=365 * recent_trade_years)
+            period_label = f"최근 {recent_trade_years}년"
+
+            # ══ 매매 최근 최저·최고가 ══
             if trades:
-                # 2021~2026년 사이 거래만 필터링
-                recent_trades = [t for t in trades if 2021 <= t['date'].year <= 2026]
+                recent_trades = [t for t in trades if t['date'] >= cutoff_date]
 
                 if recent_trades:
-                    # 저층 (4층 이하)
-                    low_floor_trades = [t for t in recent_trades if t['floor'] <= 4]
-                    min_low_trade = min(low_floor_trades, key=lambda t: t['price']) if low_floor_trades else None
-
-                    # 중고층 (5층 이상)
-                    high_floor_trades = [t for t in recent_trades if t['floor'] >= 5]
-                    min_high_trade = min(high_floor_trades, key=lambda t: t['price']) if high_floor_trades else None
-
-                    # 둘 다 있을 때 가격 비교해서 위치 결정
-                    if min_low_trade and min_high_trade:
-                        # 저층이 더 낮으면 저층은 아래, 중고층은 위
-                        if min_low_trade['price'] < min_high_trade['price']:
-                            low_ay = 40   # 저층: 아래
-                            high_ay = -40  # 중고층: 위
-                        else:
-                            low_ay = -40   # 저층: 위
-                            high_ay = 40   # 중고층: 아래
-                    else:
-                        # 하나만 있을 때는 기본값
-                        low_ay = 40
-                        high_ay = -40
-
-                    # 저층 레이블 표시
-                    if min_low_trade:
+                    # ── 매매 최근 최고가 ──
+                    max_recent_trade = max(recent_trades, key=lambda t: t['price'])
+                    is_same_as_alltime = (
+                        max_recent_trade['price'] == max(trades, key=lambda t: t['price'])['price']
+                    )
+                    if not is_same_as_alltime:
                         plotly_fig.add_annotation(
-                            x=min_low_trade['date'],
-                            y=min_low_trade['price'],
-                            text=f"최근 최저가(저층)<br>{min_low_trade['date'].strftime('%Y-%m')}<br>{min_low_trade['price']:,.0f}만원<br>({min_low_trade['floor']}층)",
+                            x=max_recent_trade['date'],
+                            y=max_recent_trade['price'],
+                            text=(
+                                f"📈 매매 {period_label} 최고가<br>"
+                                f"<b style='font-size:14px;'>{max_recent_trade['price']:,.0f}만원</b><br>"
+                                f"{max_recent_trade['date'].strftime('%Y년 %m월')}  {max_recent_trade['floor']}층"
+                            ),
                             showarrow=True,
-                            arrowhead=2,
-                            arrowsize=1,
-                            arrowwidth=2,
-                            arrowcolor="#FF6B6B",
-                            ax=40,
-                            ay=low_ay,
-                            bgcolor="white",
-                            bordercolor="#FF6B6B",
-                            borderwidth=2,
-                            font=dict(size=11, color="#FF6B6B")
+                            arrowhead=3, arrowsize=1.1, arrowwidth=2,
+                            arrowcolor="#2E7D32",
+                            ax=50, ay=-50,
+                            bgcolor="rgba(232, 245, 233, 0.97)",
+                            bordercolor="#2E7D32", borderwidth=2, borderpad=7,
+                            font=dict(size=12, color="#1B5E20", family="AppleGothic, Arial")
                         )
 
-                    # 중고층 레이블 표시
-                    if min_high_trade:
+                    # ── 매매 최근 최저가 저층/중고층 ──
+                    sale_low_f  = [t for t in recent_trades if t['floor'] <= 4]
+                    sale_high_f = [t for t in recent_trades if t['floor'] >= 5]
+                    min_sale_low  = min(sale_low_f,  key=lambda t: t['price']) if sale_low_f  else None
+                    min_sale_high = min(sale_high_f, key=lambda t: t['price']) if sale_high_f else None
+
+                    # 두 레이블 위치 충돌 방지
+                    if min_sale_low and min_sale_high:
+                        s_low_ay  = 55 if min_sale_low['price'] < min_sale_high['price'] else -55
+                        s_high_ay = -55 if s_low_ay == 55 else 55
+                    else:
+                        s_low_ay, s_high_ay = 55, -55
+
+                    if min_sale_low:
                         plotly_fig.add_annotation(
-                            x=min_high_trade['date'],
-                            y=min_high_trade['price'],
-                            text=f"최근 최저가(중고층)<br>{min_high_trade['date'].strftime('%Y-%m')}<br>{min_high_trade['price']:,.0f}만원<br>({min_high_trade['floor']}층)",
+                            x=min_sale_low['date'],
+                            y=min_sale_low['price'],
+                            text=(
+                                f"🔻 매매 {period_label} 최저 (저층)<br>"
+                                f"<b style='font-size:14px;'>{min_sale_low['price']:,.0f}만원</b><br>"
+                                f"{min_sale_low['date'].strftime('%Y년 %m월')}  {min_sale_low['floor']}층"
+                            ),
                             showarrow=True,
-                            arrowhead=2,
-                            arrowsize=1,
-                            arrowwidth=2,
-                            arrowcolor="#9C27B0",
-                            ax=40,
-                            ay=high_ay,
-                            bgcolor="white",
-                            bordercolor="#9C27B0",
-                            borderwidth=2,
-                            font=dict(size=11, color="#9C27B0")
+                            arrowhead=3, arrowsize=1.1, arrowwidth=2,
+                            arrowcolor="#B71C1C",
+                            ax=45, ay=s_low_ay,
+                            bgcolor="rgba(255, 235, 238, 0.97)",
+                            bordercolor="#B71C1C", borderwidth=2, borderpad=7,
+                            font=dict(size=12, color="#7F0000", family="AppleGothic, Arial")
+                        )
+
+                    if min_sale_high:
+                        plotly_fig.add_annotation(
+                            x=min_sale_high['date'],
+                            y=min_sale_high['price'],
+                            text=(
+                                f"🔻 매매 {period_label} 최저 (중고층)<br>"
+                                f"<b style='font-size:14px;'>{min_sale_high['price']:,.0f}만원</b><br>"
+                                f"{min_sale_high['date'].strftime('%Y년 %m월')}  {min_sale_high['floor']}층"
+                            ),
+                            showarrow=True,
+                            arrowhead=3, arrowsize=1.1, arrowwidth=2,
+                            arrowcolor="#880E4F",
+                            ax=45, ay=s_high_ay,
+                            bgcolor="rgba(252, 228, 236, 0.97)",
+                            bordercolor="#880E4F", borderwidth=2, borderpad=7,
+                            font=dict(size=12, color="#560027", family="AppleGothic, Arial")
+                        )
+
+            # ══ 전세 최근 최저가 ══
+            if leases:
+                recent_leases = [l for l in leases if l['date'] >= cutoff_date]
+
+                if recent_leases:
+                    lease_low_f  = [l for l in recent_leases if l.get('floor', 0) <= 4]
+                    lease_high_f = [l for l in recent_leases if l.get('floor', 0) >= 5]
+                    min_lease_low  = min(lease_low_f,  key=lambda l: l['price']) if lease_low_f  else None
+                    min_lease_high = min(lease_high_f, key=lambda l: l['price']) if lease_high_f else None
+
+                    # 두 레이블 위치 충돌 방지
+                    if min_lease_low and min_lease_high:
+                        j_low_ay  = 55 if min_lease_low['price'] < min_lease_high['price'] else -55
+                        j_high_ay = -55 if j_low_ay == 55 else 55
+                    else:
+                        j_low_ay, j_high_ay = 55, -55
+
+                    if min_lease_low:
+                        plotly_fig.add_annotation(
+                            x=min_lease_low['date'],
+                            y=min_lease_low['price'],
+                            text=(
+                                f"🔽 전세 {period_label} 최저 (저층)<br>"
+                                f"<b style='font-size:14px;'>{min_lease_low['price']:,.0f}만원</b><br>"
+                                f"{min_lease_low['date'].strftime('%Y년 %m월')}  {min_lease_low.get('floor', '-')}층"
+                            ),
+                            showarrow=True,
+                            arrowhead=3, arrowsize=1.1, arrowwidth=2,
+                            arrowcolor="#E65100",
+                            ax=-45, ay=j_low_ay,
+                            bgcolor="rgba(255, 243, 224, 0.97)",
+                            bordercolor="#E65100", borderwidth=2, borderpad=7,
+                            font=dict(size=12, color="#7B2D00", family="AppleGothic, Arial")
+                        )
+
+                    if min_lease_high:
+                        plotly_fig.add_annotation(
+                            x=min_lease_high['date'],
+                            y=min_lease_high['price'],
+                            text=(
+                                f"🔽 전세 {period_label} 최저 (중고층)<br>"
+                                f"<b style='font-size:14px;'>{min_lease_high['price']:,.0f}만원</b><br>"
+                                f"{min_lease_high['date'].strftime('%Y년 %m월')}  {min_lease_high.get('floor', '-')}층"
+                            ),
+                            showarrow=True,
+                            arrowhead=3, arrowsize=1.1, arrowwidth=2,
+                            arrowcolor="#BF360C",
+                            ax=-45, ay=j_high_ay,
+                            bgcolor="rgba(251, 233, 231, 0.97)",
+                            bordercolor="#BF360C", borderwidth=2, borderpad=7,
+                            font=dict(size=12, color="#7B2D00", family="AppleGothic, Arial")
                         )
 
             # ========== 하단 텍스트 박스 추가 ==========
@@ -9545,6 +9706,21 @@ class KBLandApp:
                     overlaying='y',
                     side='right',
                     showgrid=False
+                ),
+                yaxis3=dict(
+                    overlaying='y',
+                    side='left',
+                    showgrid=False,
+                    zeroline=False,
+                    range=[0, vol_max_for_layout * 5] if vol_max_for_layout > 0 else [0, 1],
+                    tickmode='array',
+                    tickvals=[0, vol_max_for_layout] if vol_max_for_layout > 0 else [0],
+                    ticktext=['0', f'{vol_max_for_layout}건'] if vol_max_for_layout > 0 else ['0'],
+                    tickfont=dict(size=10, color='rgba(30, 136, 229, 0.7)'),
+                    showticklabels=vol_max_for_layout > 0,
+                    anchor='free',
+                    position=0,
+                    title=dict(text='거래량' if vol_max_for_layout > 0 else '', font=dict(size=10, color='rgba(30, 136, 229, 0.7)'))
                 ),
                 hovermode='closest',
                 clickmode='event+select',  # 클릭 이벤트 활성화

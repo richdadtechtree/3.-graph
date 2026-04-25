@@ -843,12 +843,12 @@ class KBLandApp:
             # 엑셀 파일 로드
             wb = load_workbook(file_path, data_only=True)
             
-            # '7.매수매도' 시트 선택
+            # '5.매수우위' 시트 선택
             try:
-                sheet = wb['7.매수매도']
-                print("'7.매수매도' 시트를 찾았습니다.")
+                sheet = wb['5.매수우위']
+                print("'5.매수우위' 시트를 찾았습니다.")
             except KeyError:
-                print("'7.매수매도' 시트를 찾을 수 없습니다.")
+                print("'5.매수우위' 시트를 찾을 수 없습니다.")
                 return None
                 
             # 지역 목록 가져오기 (2행)
